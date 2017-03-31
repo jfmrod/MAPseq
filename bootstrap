@@ -1,0 +1,7 @@
+#!/bin/bash
+
+#aclocal -I m4 && autoconf -f -i -Im4 && autoheader && automake -a
+autoreconf -vfi -I m4
+#pushd eutils  # not needed because autoreconf automatically does it
+#./bootstrap
+#popd
