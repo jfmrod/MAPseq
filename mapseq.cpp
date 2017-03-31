@@ -66,6 +66,7 @@ int minid1=1;
 int minid2=1;
 int otulim=50;
 float lambda=1.280;
+float sweight=30.0;
 
 /*
 const float matchcost=2.0;
@@ -3432,7 +3433,7 @@ void taxscore(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray<
     for (int k=0; k<taxhit.tl.size(); ++k){
       if (taxcounts[k][taxhit.tl[k].tid]==taxid) continue;
       taxcounts[k][taxhit.tl[k].tid]=taxid;
-      taxscores[k]+=exp((1.0l-topscore/pinfo.matchcounts[l].score())*20.0l);
+      taxscores[k]+=exp((1.0l-topscore/pinfo.matchcounts[l].score())*sweight);
 //      taxscores[k]+=exp(log(pinfo.matchcounts[l].identity()*100.0)*30.0);
     }
 /*
@@ -3717,7 +3718,7 @@ void taskSeqsearch()
           double topscore=pinfo.tophit.score();
           double tscore=0.0;
           for (int t=0; t<pinfo.matchcounts.size(); ++t)
-            tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*20.0l);
+            tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
            outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
         }
 
@@ -3875,6 +3876,9 @@ int emain()
   initdlt();
   bool print_hits=false;
   bool print_align=false;
+  bool nocluster=false;
+  epregister(sweight);
+  epregister(nocluster);
   epregister(otulim);
   epregister(lambda);
   epregister(print_hits);
@@ -4091,7 +4095,20 @@ int emain()
 
 
   cfile=dbfile+".mscluster";
-  if (dbfilter.len()==0 && efile(cfile).exists()){ // load clustering
+  if (nocluster){
+    db.otus.reserve(db.seqs.size());
+    db.otus.add(eintarray(0));
+
+    tmpkmers.init(MAXSIZE,-1);
+    otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
+    for (i=1; i<db.seqs.size(); ++i){
+      eseq& s(db.seqs.values(i));
+      db.otus.add(eintarray(i));
+      int ibest=db.otus.size()-1;
+      db.seqotu[i]=ibest;
+      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
+    }
+  } else if (dbfilter.len()==0 && efile(cfile).exists()){ // load clustering
     efile f;
     f.open(cfile,"r");
     estr line;
