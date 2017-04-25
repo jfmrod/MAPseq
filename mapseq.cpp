@@ -3845,7 +3845,7 @@ void help()
   printf("MAPseq v%s\n",MAPSEQ_PACKAGE_VERSION);
   printf("by Joao F. Matias Rodrigues, Thomas S. B. Schmidt, Janko Tackmann, and Christian von Mering\n");
   printf("Institute of Molecular Life Sciences, University of Zurich, Switzerland\n");
-  printf("Matias Rodrigues JF, Schmidt TSB, Tackmann J, Mering C von. MAPseq: bringing speed, accuracy and consistency to metagenomic ribosomal RNA analysis. submitted. 2016.\n");
+  printf("Matias Rodrigues JF, Schmidt TSB, Tackmann J, Mering C von. MAPseq: bringing speed, accuracy and consistency to metagenomic ribosomal RNA analysis. submitted. 2017.\n");
   printf("\n");
   printf("Usage:\n");
   printf("    %s input.fa [<db> <tax1> <tax2> ...]\n",efile(getParser().args[0]).basename()._str);

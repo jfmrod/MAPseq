@@ -1,4 +1,4 @@
-AC_INIT([mapseq],[1.0])
+AC_INIT([mapseq],[1.1])
 
 : ${CXXFLAGS=-O3}
 
