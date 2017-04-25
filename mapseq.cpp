@@ -3712,7 +3712,7 @@ void taskSeqsearch()
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
   
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
-        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
        
         if (mtdata.seqdb->taxa.size()==0){
           double topscore=pinfo.tophit.score();

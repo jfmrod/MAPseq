@@ -57,7 +57,7 @@ After installation the mapseq executable can be called by simply typing "mapseq"
 
 iii) Installing from source
 
-First make sure you have the gcc compiler / build tools installed. On Ubuntu you would need to run "apt-get install build-essential" with admin priviledges. 
+First make sure you have the gcc compiler / build tools installed. On Ubuntu you would need to run "apt-get install build-essential" with admin priviledges. You will also need the libncurses dev libraries installed: "apt-get install libncurses5-dev"
 
 ./bootstrap     # this step is only needed if you cloned the repository, you will also need to install autotools/autoconf packages
 ./configure
