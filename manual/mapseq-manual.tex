@@ -18,8 +18,8 @@
  \vspace*{\baselineskip} % Whitespace at the top of the page
  {\Large by Jo\~ao F. Matias Rodrigues, Thomas S. B. Schmidt, Janko Tackmann, and Christian von Mering\\
  Institute of Molecular Life Sciences\\University of Z\"urich\\Switzerland}\\[0.167\textheight] % Author name
- {\Huge MAPseq v1.0 (October 2016)}\\[\baselineskip] % Main title which draws the focus of the reader
- {\Large \textit{bringing speed, accuracy and consistency to metagenomic ribosomal RNA analysis}}\par % Tagline or further description
+ {\Huge MAPseq v1.1 (April 2017)}\\[\baselineskip] % Main title which draws the focus of the reader
+ {\Large \textit{improving speed, accuracy and consistency in metagenomic ribosomal RNA analysis}}\par % Tagline or further description
 }
 \vfill % Whitespace between the title block and the publisher
 \vspace*{3\baselineskip} % Whitespace at the bottom of the page
@@ -39,11 +39,19 @@ reference set of full-length ribosomal RNA sequences for which known taxonomies 
 and for which a set of high quality OTU clusters has been previously generated.
 For each read, the best guess and correspoding confidence in the assignment is shown at
 each taxonomic and OTU level.
+\\
+For bugs and more information contact: Joao F. Matias Rodrigues {\textgreater}jfmrod@gmail.com\textless
 
 
 \section{INSTALLATION}
 
 \subsection{Linux/Unix/MacOSX}
+
+You can get the source code or binary packages at:
+
+http://meringlab.org/software/mapseq/
+\\
+
 
 To install MAPseq on a linux, unix, or MacOSX simply type:
 
@@ -66,6 +74,8 @@ the command "make install".
 
 \section{USING MAPseq}
 
+\subsection{Default reference}
+
 MAPseq takes as input a fasta file with raw sequence data which should have been previously
 demultiplexed and quality filtered usually from a fastq file produced by the sequencing machine.
 
@@ -78,6 +88,25 @@ This will classify all the sequences found in rawseqs against the standard refer
 provided with MAPseq.
 
 You can change the number of threads that MAPseq uses with the -nthreads {\textless}no\_threads\textgreater argument.
+
+
+\subsection{Custom user-provided reference}
+
+You can use mapseq with your own fasta reference and taxonomy files with the following command:
+
+mapseq rawseqs.fa {\textgreater}customref.fasta{\textless} {\textgreater}customref.tax\textless [customref.tax2 ...] \textgreater rawseqs.fa.mseq
+
+Where customref.fasta is a nucleotide fasta file with your reference set and customref.tax, customref.tax2 are one or more taxonomic assignments for each sequence in the reference.
+
+The taxonomy file should have a header (preceeded with the \# character) with the identity cutoff parameters and description of the taxonomy followed by two tab-separated columns composed of the accession id and the taxonomy. For example:
+
+\#cutoff: 0.00:0.08 0.70:0.35 0.70:0.35 0.70:0.35 0.80:0.25 0.92:0.08 0.95:0.05
+\#name: NCBI
+\#levels: Kingdom Phylum Class Order Family Genus Species
+HE801216:78..1345       Bacteria;Proteobacteria;Gammaproteobacteria;Methylococcales;Methylococcaceae;Methylomonas;Methylomonas paludis
+HE802067:76740..77993   Bacteria;Actinobacteria;Actinobacteria;Corynebacteriales;Corynebacteriaceae;Corynebacterium;Corynebacterium glutamicum
+HE804045:1012175..1013425       Bacteria;Actinobacteria;Actinobacteria;Pseudonocardiales;Pseudonocardiaceae;Saccharothrix;Saccharothrix espanaensis
+
 
 
 \section{EXAMPLE OUTPUT}
