@@ -3929,7 +3929,10 @@ int emain()
   mtdata.print_align=print_align;
   mtdata.print_hits=print_hits;
 
-  ldieif(getParser().args.size()<2,"syntax: mapseq <query> [db] [tax] [tax2] ...");
+  if(getParser().args.size()<2){
+    cout << "syntax: mapseq <query> [db] [tax] [tax2] ..." << endl;
+    return(0);
+  }
   estr cfile;
 
   for (unsigned int i=0; i<MAXSIZE; ++i)
