@@ -94,7 +94,7 @@ You can change the number of threads that MAPseq uses with the -nthreads {\textl
 
 You can use mapseq with your own fasta reference and taxonomy files with the following command:
 
-mapseq rawseqs.fa {\textgreater}customref.fasta{\textless} {\textgreater}customref.tax\textless [customref.tax2 ...] \textgreater rawseqs.fa.mseq
+mapseq rawseqs.fa {\textless}customref.fasta{\textgreater} {\textless}customref.tax\textgreater [customref.tax2 ...] \textgreater rawseqs.fa.mseq
 
 Where customref.fasta is a nucleotide fasta file with your reference set and customref.tax, customref.tax2 are one or more taxonomic assignments for each sequence in the reference.
 
@@ -103,9 +103,9 @@ The taxonomy file should have a header (preceeded with the \# character) with th
 \#cutoff: 0.00:0.08 0.70:0.35 0.70:0.35 0.70:0.35 0.80:0.25 0.92:0.08 0.95:0.05
 \#name: NCBI
 \#levels: Kingdom Phylum Class Order Family Genus Species
-HE801216:78..1345       Bacteria;Proteobacteria;Gammaproteobacteria;Methylococcales;Methylococcaceae;Methylomonas;Methylomonas paludis
-HE802067:76740..77993   Bacteria;Actinobacteria;Actinobacteria;Corynebacteriales;Corynebacteriaceae;Corynebacterium;Corynebacterium glutamicum
-HE804045:1012175..1013425       Bacteria;Actinobacteria;Actinobacteria;Pseudonocardiales;Pseudonocardiaceae;Saccharothrix;Saccharothrix espanaensis
+HE801216:78..1345{\tab}Bacteria;Proteobacteria;Gammaproteobacteria;Methylococcales;...
+HE802067:76740..77993{\tab}Bacteria;Actinobacteria;Actinobacteria;Corynebacteriales;...
+HE804045:1012175..1013425{\tab}Bacteria;Actinobacteria;Actinobacteria;Pseudonocardiales;...
 
 
 
@@ -140,40 +140,12 @@ Each field is tab separated and indicates the following:
 
 11      Reference end pos
 
-12      (empty)
+12      Strand (+/-)
+
+13      (empty)
 
 After the first empty field the taxonomy classifications and confidences are shown, every taxonomy classification is separated by an empty field.
 Although different fasta reference and taxonomy databases can be specified by the user, by default mapseq maps reads to the NCBI taxonomy and to OTU taxonomies
-
-NCBI taxonomy fields:
-
-13,14,15        kingdom, combined confidence (score+cutoff), score confidence
-
-16,17,18        phylum, combined confidence, score confidence
-
-19,20,21        class, combined confidence, score confidence
-
-22,23,24        order, combined confidence, score confidence
-
-25,26,27        family, combined confidence, score confidence
-
-28,29,30        genus, combined confidence, score confidence
-
-31,32,33        species, combined confidence, score confidence
-
-34      (empty)
-
-OTU taxonomy fields:
-
-35,36,37        kingdom, combined confidence (score+cutoff), score confidence
-
-38,39,40        90\% otus, combined confidence, score confidence
-
-41,42,43        96\% otus, combined confidence, score confidence
-
-44,45,46        98\% otus, combined confidence, score confidence
-
-47,48,49        99\% otus, combined confidence, score confidence
 
 The combined confidence is computed based on a score confidence, used to control misclassification errors, and a identity cutoff confidence, used to ensure that the query isnt misclassified due to the inexistence of a sequence representative in the database of the true classification. The score confidence is
 calculated by comparing the identity of the assigned taxonomy to the identity of the first sequence not matching the assigned taxonomy.
