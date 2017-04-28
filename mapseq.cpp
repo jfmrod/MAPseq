@@ -104,6 +104,8 @@ class etax
   efloatarray cutoffcoef;
 };
 
+typedef ebasicarray<unsigned int> euintarray;
+
 class esearchws
 {
  public:
@@ -114,13 +116,13 @@ class esearchws
   uint64_t *bitmask;
   eintarray idcount;
   ebasicarray<uint32_t> idcount2;
-  int maskid;
-  eintarray kmermask;
-  int offset;
-  eintarray kmerpos;
-  eintarray kmerposrev;
-  int offset2;
-  eintarray kmerpos2;
+  unsigned int maskid;
+  euintarray kmermask;
+  unsigned int offset;
+  euintarray kmerpos;
+  euintarray kmerposrev;
+  unsigned int offset2;
+  euintarray kmerpos2;
   ebasicarray<eintarray> taxcounts;
 };
 
@@ -1032,9 +1034,9 @@ void seqident_rev(const eseq& s1,long offset1,eintarray& kmerpos1,const eseq& s2
       v1=pstr1[p1/32u]>>(2u*(p1%32u));
       v1|=(pstr1[p1/32u+1u]<<(64u-2u*(p1%32u)))&safe_shift[p1%32u];
       for (k=0; k<32u-KMERSIZE; ++k,v1>>=2u){
-        int kpos2=kmerpos2[kmer_rev_lt[v1&KMERMASK]]-offset2;
-        if (kpos2>-1){
-          kpos2=s2.seqlen-kpos2;
+        int kpos2=kmerpos2[kmer_rev_lt[v1&KMERMASK]]; // -offset2;
+        if (kpos2>offset2){
+          kpos2=s2.seqlen-kpos2-offset2;
           int d=p1+k-lastkmerpos;
           if (d<=KMERSIZE && ((lastndelta==kpos2-p1-k) || (v1&KMERMASK)==seqrevkmer(s2,p1+k+lastndelta))){
             lastkmerlen+=d;
@@ -1304,6 +1306,7 @@ void seqident(const eseq& s1,int offset1,eintarray& kmerpos1,const eseq& s2,int 
 }
 */
 
+/*
 void seqident_local_fast(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as)
 {
   long p1,p2;
@@ -1458,9 +1461,9 @@ void seqident_local_fast(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealig
     LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
     LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,0,s1.seqlen));
     long gapdiff=abs((bestseg->bestseg->i-bestseg->bestseg->i2)-(bestseg->i-bestseg->i2));
-    if (gapdiff==0) /* fast alignment no gaps */
+    if (gapdiff==0)
       seqident_seg_nogaps(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,as);
-    else /* full sw alignment */
+    else
       seqident_seg(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,as);
 //      seqcalign_global(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,sws.alignws,as);
     LDEBUG(D_SEQIDENT,cout << "segid: " << bestseg->bestseg->j << "," << bestseg->i << " l: " << bestseg->i-bestseg->bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
@@ -1487,7 +1490,9 @@ void seqident_local_fast(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealig
 
   return;
 }
+*/
 
+/*
 void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as)
 {
   long p1,p2;
@@ -1644,6 +1649,7 @@ void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndat
       sit->second->V=tmpbestscore;
       
 //      sit->second->V=(sit->second->j-sit->second->i)*as.match-gapdiff*as.gapext-(gapdiff>0?as.gapopen:0)+ MIN(sit->second->j-slb->second->i,sit->second->j2-slb->second->i2)*(9.0/10.0*as.match-1.0/10.0*as.mismatch) +slb->second->V;
+*/
 /*
       sit->second->bestseg=0x00;
       double newscore=-gapdiff*as.gapext-(gapdiff>0?as.gapopen:0)+ MIN(sit->second->j-slb->second->i,sit->second->j2-slb->second->i2)*(7.0/8.0*as.match-1.0/8.0*as.mismatch) +slb->second->V;
@@ -1654,6 +1660,7 @@ void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndat
         sit->second->V+=MIN(sit->second->i,sit->second->j)*(7.0/8.0*as.match-1.0/8.0*as.mismatch);
       }
 */
+/*
 //        double newscore=(sit->second->j-sit->second->i)*as.match - gapdiff*as.gapext-(gapdiff>0?as.gapopen:0) + slb->second->V;
 //      if (sit->second->V < newscore){
 //        sit->second->V=newscore;
@@ -1689,14 +1696,14 @@ void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndat
 //  estr as1,as2;
 //  seqcalign_global_noedgegap(s1,0,s1.seqlen,s2,0,s2.seqlen,as1,as2);
 //  print_seqali(as1,as2);
-
+*/
 /*  
   if (bestseg->bestseg==0x00){ // single segment hit, do full alignment
     seqcalign_global_noedgegap(s1,0,s1.seqlen,s2,0,s2.seqlen,adata,sws.alignws,as);
     return;
   }
 */
-
+/*
   ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2));
   long minright=MIN(s1.seqlen-bestseg->j,s2.seqlen-bestseg->j2);
 //  seqcalign_global_norightedgegap(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,alignws);
@@ -1708,9 +1715,9 @@ void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndat
     LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
     LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,0,s1.seqlen));
     long gapdiff=abs((bestseg->bestseg->i-bestseg->bestseg->i2)-(bestseg->i-bestseg->i2));
-    if (gapdiff==0) /* fast alignment no gaps */
+    if (gapdiff==0)
       seqident_seg_nogaps(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,as);
-    else /* full sw alignment */
+    else
       seqcalign_global(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,sws.alignws,as);
     LDEBUG(D_SEQIDENT,cout << "segid: " << bestseg->bestseg->j << "," << bestseg->i << " l: " << bestseg->i-bestseg->bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << " gapdiff: " << gapdiff << endl);
     LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,0,s1.seqlen));
@@ -1735,8 +1742,9 @@ void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndat
 
   return;
 }
+*/
 
-void seqident_local(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
 {
   long p1,p2;
   unsigned long *pstr1=reinterpret_cast<unsigned long*>(s1.seq._str);
@@ -1768,8 +1776,9 @@ void seqident_local(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata
       v1=pstr1[p1/32u]>>(2u*(p1%32u));
       v1|=(pstr1[p1/32u+1u]<<(64u-2u*(p1%32u)))&safe_shift[p1%32u];
       for (k=0; k<32u-KMERSIZE; ++k,v1>>=2u){
-        long kpos2=sws.kmerpos2[v1&KMERMASK]-sws.offset2;
-        if (kpos2>-1){
+        long kpos2=sws.kmerpos2[v1&KMERMASK];
+        if (kpos2>sws.offset2){
+          kpos2-=sws.offset2;
           long d=p1+k-lastkmerpos;
           
           if (d<=KMERSIZE && ((lastndelta==kpos2-p1-k) || (p1+k+lastndelta+KMERSIZE<=s2.seqlen && (v1&KMERMASK)==seqkmer(s2,p1+k+lastndelta)))){
@@ -1789,8 +1798,9 @@ void seqident_local(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata
     v1=pstr1[p1/32u]>>(2u*(p1%32u));
     v1|=(pstr1[p1/32u+1u]<<(64u-2u*(p1%32u)))&safe_shift[p1%32u];
     for (k=0; p1+k+KMERSIZE<s1_end; ++k,v1>>=2u){
-      long kpos2=sws.kmerpos2[v1&KMERMASK]-sws.offset2;
-      if (kpos2>-1){
+      long kpos2=sws.kmerpos2[v1&KMERMASK];
+      if (kpos2>sws.offset2){
+        kpos2-=sws.offset2;
         long d=p1+k-lastkmerpos;
         if (d<=KMERSIZE && ((lastndelta==kpos2-p1-k) || (p1+k+lastndelta+KMERSIZE<=s2.seqlen && (v1&KMERMASK)==seqkmer(s2,p1+k+lastndelta)))){
           lastkmerlen+=d;
@@ -1816,8 +1826,9 @@ void seqident_local(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata
       v2=pstr2[p2/32u]>>(2u*(p2%32u));
       v2|=(pstr2[p2/32u+1u]<<(64u-2u*(p2%32u)))&safe_shift[p2%32u];
       for (k=0; k<32u-KMERSIZE; ++k,v2>>=2u){
-        long kpos1=kmerpos1[v2&KMERMASK]-sws.offset+s1_start;
-        if (kpos1>-1){
+        long kpos1=kmerpos1[v2&KMERMASK];
+        if (kpos1>sws.offset){
+          kpos1+=s1_start-sws.offset;
           long d=p2+k-lastkmerpos;
           if (d<=KMERSIZE && ((lastndelta==kpos1-p2-k) || (p2+k-lastndelta+KMERSIZE<=s1_end && (v2&KMERMASK)==seqkmer(s1,p2+k-lastndelta)))){
             lastkmerlen+=d;
@@ -1836,8 +1847,9 @@ void seqident_local(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata
     v2=pstr2[p2/32u]>>(2u*(p2%32u));
     v2|=(pstr2[p2/32u+1u]<<(64u-2u*(p2%32u)))&safe_shift[p2%32u];
     for (k=0; p2+k+KMERSIZE<s2.seqlen; ++k,v2>>=2u){
-      long kpos1=kmerpos1[v2&KMERMASK]-sws.offset+s1_start;
-      if (kpos1>-1){
+      long kpos1=kmerpos1[v2&KMERMASK];
+      if (kpos1>sws.offset){
+        kpos1+=s1_start-sws.offset;
         long d=p2+k-lastkmerpos;
         if (d<=KMERSIZE && ((lastndelta==kpos1-p2-k) || (p2+k-lastndelta+KMERSIZE<=s1_end && (v2&KMERMASK)==seqkmer(s1,p2+k-lastndelta)))){
           lastkmerlen+=d;
@@ -1952,7 +1964,7 @@ void seqident_local(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata
 
 
   float tmpflanks=0.0;
-  ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2));
+  ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2)+" s1 id: "+s1id+" s2 id: "+s2id);
   long minright=MIN(s1.seqlen-bestseg->j,s2.seqlen-bestseg->j2);
 //  seqcalign_global_norightedgegap(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,alignws);
   seqcalign_local_rightext(s1,bestseg->j,MIN(s1.seqlen,bestseg->j+2*minright),s2,bestseg->j2,MIN(s2.seqlen,bestseg->j2+2*minright),adata,sws.alignws,as);
@@ -2008,7 +2020,7 @@ void seqident_local(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndata
 
 
 
-void kmercount_mask(estrarrayof<eseq>& seqs,eintarray& seqids,uint64_t *kmermask,int maskid,eintarray& idcount,unsigned int *akmers,unsigned long akmask)
+void kmercount_mask(estrarrayof<eseq>& seqs,eintarray& seqids,uint64_t *kmermask,unsigned int maskid,eintarray& idcount,unsigned int *akmers,unsigned long akmask)
 {
   int k;
   long p;
@@ -2078,7 +2090,7 @@ void kmercount_mask(estrarrayof<eseq>& seqs,eintarray& seqids,uint64_t *kmermask
   }
 }
 
-void kmercount_mask(estrarrayof<eseq>& seqs,eintarray& seqids,eintarray& kmermask,int maskid,eintarray& idcount)
+void kmercount_mask(estrarrayof<eseq>& seqs,eintarray& seqids,euintarray& kmermask,unsigned int maskid,eintarray& idcount)
 {
   int k;
   long p;
@@ -2192,7 +2204,7 @@ void setkmermask(eintarray& kmermask,eseq& s,int maskid)
     kmermask[v&KMERMASK]=maskid;
 }
 
-void setkmermask(eintarray& kmermask,eseq& s,int maskid,unsigned int *akmers,unsigned long akmask,unsigned long start,unsigned long end)
+void setkmermask(euintarray& kmermask,eseq& s,unsigned int maskid,unsigned int *akmers,unsigned long akmask,unsigned long start,unsigned long end)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -2215,7 +2227,7 @@ void setkmermask(eintarray& kmermask,eseq& s,int maskid,unsigned int *akmers,uns
   }
 }
 
-void setkmermask(eintarray& kmermask,eseq& s,int maskid,unsigned int *akmers,unsigned long akmask)
+void setkmermask(euintarray& kmermask,eseq& s,unsigned int maskid,unsigned int *akmers,unsigned long akmask)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -2238,7 +2250,7 @@ void setkmermask(eintarray& kmermask,eseq& s,int maskid,unsigned int *akmers,uns
   }
 }
 
-void setkmerpos(eintarray& kmerpos,eseq& s,int offset,unsigned long start,unsigned long end)
+void setkmerpos(euintarray& kmerpos,eseq& s,unsigned int offset,unsigned long start,unsigned long end)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -2256,7 +2268,7 @@ void setkmerpos(eintarray& kmerpos,eseq& s,int offset,unsigned long start,unsign
     kmerpos[v&KMERMASK]=offset+(p+k-start);
 }
 
-void setkmerpos(eintarray& kmerpos,eseq& s,int offset)
+void setkmerpos(euintarray& kmerpos,eseq& s,unsigned int offset)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -3223,9 +3235,9 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
     randomize(seqids);
     sws.idcount.init(seqids.size(),0);
   
-    if (sws.maskid+1<sws.maskid){
-      sws.maskid=-1;
-      sws.kmermask.init(KMERSIZE,-1);
+    if (sws.maskid+1u<sws.maskid){
+      sws.maskid=1u;
+      sws.kmermask.init(KMERSIZE,0u);
     }
     ++sws.maskid;
   
@@ -3284,10 +3296,10 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
     }
 */
 
-    if (sws.offset+int(s_len)<sws.offset){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
-      sws.offset=0;
-      sws.kmerpos.init(MAXSIZE,-1);
-      sws.kmerposrev.init(MAXSIZE,-1);
+    if (sws.offset+(unsigned int)(s_len)<sws.offset){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
+      sws.offset=1u;
+      sws.kmerpos.init(MAXSIZE,0u);
+      sws.kmerposrev.init(MAXSIZE,0u);
     }
 //    cout << "# 2nd counting -- setkmerpos" << endl;
     setkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
@@ -3316,9 +3328,9 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
     for (int l=0; l<best.size(); ++l){
       int sbest=seqids[best[l]]%db.seqs.size();
       eseq &sdb(db.seqs.values(sbest));
-      if (sws.offset2+int(db.seqs.values(sbest).seqlen)<sws.offset2){  // need an int here otherwise the comparison is made in long and the offset is not correctly reset
-        sws.offset2=0;
-        sws.kmerpos2.init(MAXSIZE,-1);
+      if (sws.offset2+(unsigned int)(db.seqs.values(sbest).seqlen)<sws.offset2){  // need an unsigned int here otherwise the comparison is made in long and the offset is not correctly reset, signed int overflows are undefined so this cannot be done with signed ints either
+        sws.offset2=1u;
+        sws.kmerpos2.init(MAXSIZE,0);
       }
       setkmerpos(sws.kmerpos2,db.seqs.values(sbest),sws.offset2);
   
@@ -3329,7 +3341,7 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
     
       if (seqids[best[l]]<db.seqs.size()){
 //        cout << "# forward align" << endl;
-        seqident_local(s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
+        seqident_local(str2id,db.seqs.keys(sbest),s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
   //      seqident_global(s,sws.kmerpos,sdb,adata,sws,as);
   //      seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
   /*
@@ -3343,7 +3355,7 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
   */
       }else{
 //        cout << "# reverse align" << endl;
-        seqident_local(srev,sws.kmerposrev,sdb,adata,sws,as);
+        seqident_local(str2id,db.seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata,sws,as);
         // flip 
         int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
         adata.revcompl=true;
@@ -3673,13 +3685,13 @@ void taskSeqsearch()
   searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
   searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
   searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
-  searchws.kmerpos.init(MAXSIZE,-1);
-  searchws.kmerpos2.init(MAXSIZE,-1);
-  searchws.kmerposrev.init(MAXSIZE,-1);
-  searchws.offset=0;
-  searchws.offset2=0;
-  searchws.kmermask.init(MAXSIZE,-1);
-  searchws.maskid=-1;
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerpos2.init(MAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
   while(1){
     mtdata.m.lock();
     while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
