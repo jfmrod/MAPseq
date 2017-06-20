@@ -3536,6 +3536,7 @@ void load_taxa(const estr& taxfile,eseqdb& db)
     if (line[0]=='#'){
       parts=line.explode(" ");
       if (parts[0]=="#cutoff:"){
+        ldieif(tax.cutoff.size()>0,"duplicate #cutoff lines!!");
         for (int i=1; i<parts.size(); ++i){
           parts2=parts[i].explode(":");
           ldieif(parts2.size()<2,"not enough parts on #cutoff line, i.e.: 0.97:0.02");
@@ -3889,6 +3890,7 @@ int emain()
   bool print_hits=false;
   bool print_align=false;
   bool nocluster=false;
+  estr cutoffs;
   epregister(sweight);
   epregister(nocluster);
   epregister(otulim);
@@ -3904,6 +3906,7 @@ int emain()
   epregister2(as.gapext,"gapext");
   epregister2(as.gapopen,"gapopen");
   epregister2(as.dropoff,"dropoff");
+  epregister(cutoffs);
   estr dbfilter;
   epregister(dbfilter);
   outfmt.choice=0;
@@ -4080,6 +4083,20 @@ int emain()
       load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapseqref.fasta.ltps119tax",db);
     }
   }
+  if (cutoffs.size()>0 && db.taxa.size()>0){
+    ldieif(db.taxa.size()>1,"more than one taxonomy provided, cant use -cutoffs to specify cutoffs");
+    etax& tax(db.taxa[0]);
+    estrarray parts2;
+    estrarray parts=cutoffs.explode(" ");
+    ldieif(parts.size()<tax.cutoff.size(),"not enough cutoff levels: "+estr(tax.cutoff.size()));
+    tax.cutoff.clear(); tax.cutoffcoef.clear();
+    for (int i=0; i<parts.size(); ++i){
+      parts2=parts[i].explode(":");
+      ldieif(parts2.size()<2,"not enough parts on cutoff argument, i.e.: 0.97:0.02");
+      tax.cutoff.add(parts2[0].f());
+      tax.cutoffcoef.add(parts2[1].f());
+    }
+  }
 
 
   
@@ -4170,6 +4187,7 @@ int emain()
         tmpi=parts[i].i();
 //        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax==0x00) continue; // do not add sequence if there is no taxonomic annotation
         if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
+        ldieif(tmpi>=db.seqs.size(),"cluster file has more sequence ids than original file, please remove cluster file: "+cfile);
         tmpo.add(tmpi);
         db.seqotu[tmpi]=db.otus.size()-1;
       }
