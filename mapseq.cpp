@@ -4017,11 +4017,11 @@ int emain()
   }
 */
 
-  estr dbfile=estr(DATAPATH)+"/mapseqref.fasta";
+  estr dbfile=estr(DATAPATH)+"/mapref.fna";
   if (getParser().args.size()>2)
     dbfile=getParser().args[2];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapseqref.fasta";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
 //  estrhashof<int> seqind;
@@ -4073,14 +4073,14 @@ int emain()
       load_taxa(getParser().args[i],db);
     }
   }else if (getParser().args.size()<=2){ // do not automatically load taxonomy if database is specified
-    if (efile(estr(DATAPATH)+"/mapseqref.fasta.ncbitax").exists()){
-      load_taxa(estr(DATAPATH)+"/mapseqref.fasta.ncbitax",db);
-      load_taxa(estr(DATAPATH)+"/mapseqref.fasta.otutax",db);
-      load_taxa(estr(DATAPATH)+"/mapseqref.fasta.ltps119tax",db);
-    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapseqref.fasta.ncbitax").exists()){
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapseqref.fasta.ncbitax",db);
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapseqref.fasta.otutax",db);
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapseqref.fasta.ltps119tax",db);
+    if (efile(estr(DATAPATH)+"/mapref.fna.ncbitax").exists()){
+      load_taxa(estr(DATAPATH)+"/mapref.fna.ncbitax",db);
+      load_taxa(estr(DATAPATH)+"/mapref.fna.otutax",db);
+      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
+    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ncbitax").exists()){
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ncbitax",db);
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.otutax",db);
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
     }
   }
   if (cutoffs.size()>0 && db.taxa.size()>0){

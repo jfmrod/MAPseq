@@ -11,10 +11,15 @@ if !USE_SYSEUTILS
 #  AM_CXXFLAGS+= -Ilibs
 endif
 
+mapref-2.0.tar.gz :
+	wget http://www.meringlab.org/software/mapseq/mapref-2.0.tar.gz
+
+data/mapref.fna : mapref-2.0.tar.gz
+	tar -Cdata -xvzf mapref-2.0.tar.gz && mv data/mapref-2.0/* data/ && rmdir data/mapref-2.0 && touch data/mapref.fna
 
 #TESTS=tests/simple.sh
 
-mapseqref_files=data/mapseqref.fasta.ltps119tax data/mapseqref.fasta data/mapseqref.fasta.mscluster data/mapseqref.fasta.ncbitax data/mapseqref.fasta.otutax data/mapseqref.gold.fasta data/mapseqref.gold.fasta.tax
+mapref_files=data/mapref.fasta.ltps119tax data/mapref.fasta data/mapref.fasta.mscluster data/mapref.fasta.ncbitax data/mapref.fasta.otutax data/mapref.gold.fasta data/mapref.gold.fasta.tax
 
 #noinst_LIBRARIES=libmapseqali.a
 #libmapseqali_a_SOURCES=eseqali.h eseqali.cpp eseq.h eseq.cpp
@@ -28,11 +33,11 @@ bin_PROGRAMS=mapseq
 
 #LIBS=`eutils-config --libs || eutils/eutils-config --libs`
 EXTRA_PROGRAMS=kmerseqtables
-EXTRA_DIST=manual/mapseq-manual.tex manual/mapseq-manual.pdf data/make-transtable.sh data/prot_trans_table.h data/transl_table $(mapseqref_files)
+EXTRA_DIST=manual/mapseq-manual.tex manual/mapseq-manual.pdf data/make-transtable.sh data/prot_trans_table.h data/transl_table $(mapref_files)
 
 
-mapseqrefdir = $(datadir)/mapseq
-mapseqref_DATA=$(mapseqref_files)
+maprefdir = $(datadir)/mapseq
+mapref_DATA=$(mapref_files)
 
 # data/mapseqref.fa data/mapseqref.ncbitax data/mapseqref.otutax 
 
