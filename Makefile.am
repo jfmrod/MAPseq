@@ -11,15 +11,9 @@ if !USE_SYSEUTILS
 #  AM_CXXFLAGS+= -Ilibs
 endif
 
-mapref-2.0.tar.gz :
-	wget http://www.meringlab.org/software/mapseq/mapref-2.0.tar.gz
-
-data/mapref.fna : mapref-2.0.tar.gz
-	tar -Cdata -xvzf mapref-2.0.tar.gz && mv data/mapref-2.0/* data/ && rmdir data/mapref-2.0 && touch data/mapref.fna
-
 #TESTS=tests/simple.sh
 
-mapref_files=data/mapref.fasta.ltps119tax data/mapref.fasta data/mapref.fasta.mscluster data/mapref.fasta.ncbitax data/mapref.fasta.otutax data/mapref.gold.fasta data/mapref.gold.fasta.tax
+mapref_files=data/mapref.fna.ltps119tax data/mapref.fna data/mapref.fna.mscluster data/mapref.fna.ncbitax data/mapref.fna.otutax # data/mapref.gold.fasta data/mapref.gold.fasta.tax
 
 #noinst_LIBRARIES=libmapseqali.a
 #libmapseqali_a_SOURCES=eseqali.h eseqali.cpp eseq.h eseq.cpp

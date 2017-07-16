@@ -1,5 +1,5 @@
 
-MAPseq v1.0 (24 April 2017)
+MAPseq v1.2 (16 July 2017)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 Matias Rodrigues JF, Schmidt TSB, Tackmann J, Mering C von. MAPseq: bringing speed, accuracy and consistency to metagenomic ribosomal RNA analysis. submitted.
@@ -29,36 +29,28 @@ For bugs and more information contact: Joao F. Matias Rodrigues <jfmrod@gmail.co
 1. INSTALLATION
 =================================================
 
-You can get the source code or binary packages at:
+You can get the source code on github or binary packages at:
+
+git clone https://github.com/jfmrod/MAPseq.git
 
 http://meringlab.org/software/mapseq/
-
 
 
 i) Installing the binary package
 
 To install the binary package simply unpack the contents of the mapseq tar.gz file, i.e.:
 
-tar -xvzf mapseq-1.0-bin.tar.gz
+tar -xvzf mapseq-1.2-linux.tar.gz   # for the linux version
 or
-tar -xvzf mapseq-1.0-bin-macosx.tar.gz  # for the MacOSX version
+tar -xvzf mapseq-1.2-macosx.tar.gz  # for the MacOSX version
 
-The mapseq binary will be located in the mapseq-1.0-bin directory. You may move the whole directory to another location. Moving the binary elsewhere will break the installation though, as the data files and libraries are searched for in relation to the binary's path.
+The mapseq binary will be located in the created directory. You may move the whole directory to another location. Moving the binary elsewhere will break the installation though, as the data files are searched for in relation to the binary's path.
 
-
-ii) Installing the ubuntu/debian package
-
-To install the ubuntu/debian package you need admin priviledges. Simply run the following command:
-
-sudo dpkg -i mapseq_1.0-1_amd64.deb
-
-After installation the mapseq executable can be called by simply typing "mapseq" on the shell.
-
-
-iii) Installing from source
+ii) Installing from source
 
 First make sure you have the gcc compiler / build tools installed. On Ubuntu you would need to run "apt-get install build-essential" with admin priviledges. You will also need the libncurses dev libraries installed: "apt-get install libncurses5-dev"
 
+./setup.sh      # downloads eutils and the reference data files
 ./bootstrap     # this step is only needed if you cloned the repository, you will also need to install autotools/autoconf packages
 ./configure
 make
@@ -154,6 +146,10 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 =================================================
 4. HISTORY
+
+1.2 (16 July 2017)
+- Updated mapref to v2.0, now includes 1.5 million sequences
+- Added assert checks
 
 1.1 (24 April 2017)
 - Several improvements and bug fixes, updated to latest NCBI taxonomy
