@@ -3,6 +3,7 @@
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
+Reference:
 Matias Rodrigues JF, Schmidt TSB, Tackmann J, Mering C von. MAPseq: bringing speed, accuracy and consistency to metagenomic ribosomal RNA analysis. submitted.
 
 ---
@@ -28,7 +29,6 @@ For bugs and more information contact: Joao F. Matias Rodrigues <jfmrod@gmail.co
 
 
 ## 1. INSTALLATION
-=================================================
 
 You can get the source code on github or binary packages at:
 
