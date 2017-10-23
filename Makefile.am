@@ -13,7 +13,8 @@ endif
 
 #TESTS=tests/simple.sh
 
-mapref_files=data/mapref.fna.ltps119tax data/mapref.fna data/mapref.fna.mscluster data/mapref.fna.ncbitax data/mapref.fna.otutax # data/mapref.gold.fasta data/mapref.gold.fasta.tax
+#mapref_files=data/mapref.fna.ltps119tax data/mapref.fna data/mapref.fna.mscluster data/mapref.fna.ncbitax data/mapref.fna.otutax # data/mapref.gold.fasta data/mapref.gold.fasta.tax
+mapref_files=data/mapref-2.2.fna data/mapref-2.2.fna.mscluster data/mapref-2.2.fna.ncbitax data/mapref-2.2.fna.otutax # data/mapref.gold.fasta data/mapref.gold.fasta.tax
 
 #noinst_LIBRARIES=libmapseqali.a
 #libmapseqali_a_SOURCES=eseqali.h eseqali.cpp eseq.h eseq.cpp

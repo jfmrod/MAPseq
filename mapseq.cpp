@@ -4017,11 +4017,11 @@ int emain()
   }
 */
 
-  estr dbfile=estr(DATAPATH)+"/mapref.fna";
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
   if (getParser().args.size()>2)
     dbfile=getParser().args[2];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
 //  estrhashof<int> seqind;
@@ -4073,14 +4073,14 @@ int emain()
       load_taxa(getParser().args[i],db);
     }
   }else if (getParser().args.size()<=2){ // do not automatically load taxonomy if database is specified
-    if (efile(estr(DATAPATH)+"/mapref.fna.ncbitax").exists()){
-      load_taxa(estr(DATAPATH)+"/mapref.fna.ncbitax",db);
-      load_taxa(estr(DATAPATH)+"/mapref.fna.otutax",db);
-      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
-    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ncbitax").exists()){
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ncbitax",db);
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.otutax",db);
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
+    if (efile(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax").exists()){
+      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax",db);
+      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.otutax",db);
+//      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
+    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax").exists()){
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax",db);
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.otutax",db);
+//      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
     }
   }
   if (cutoffs.size()>0 && db.taxa.size()>0){

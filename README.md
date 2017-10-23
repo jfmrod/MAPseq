@@ -1,5 +1,5 @@
 
-# MAPseq v1.2 (16 July 2017)
+# MAPseq v1.2 (23 Oct 2017)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -124,7 +124,7 @@ Field
 9	Query end pos  
 10	Reference start pos  
 11	Reference end pos  
-12 Strand (+/-)  
+12      Strand (+/-)  
 13	[empty]  
 
 After the first empty field the taxonomy classifications and confidences are shown, every taxonomy classification is separated by an empty field.
@@ -142,15 +142,19 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+1.2.1 (23 Oct 2017)
+- Updated mapref to v2.2. Fixed several issues with v2.0.
+- Dropped LTP taxonomy due to low coverage.
+
 
 1.2 (16 July 2017)  
-- Updated mapref to v2.0, now includes 1.5 million sequences  
-- Added assert checks  
+- Updated mapref to v2.0, now includes 1.5 million sequences.  
+- Added assert checks.  
 
 1.1 (24 April 2017)  
-- Several improvements and bug fixes, updated to latest NCBI taxonomy  
+- Several improvements and bug fixes, updated to latest NCBI taxonomy.  
 
 1.0 (14 October 2016)  
-- First release of MAPseq  
+- First release of MAPseq.  
 
 
