@@ -146,7 +146,6 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 - Updated mapref to v2.2. Fixed several issues with v2.0.
 - Dropped LTP taxonomy due to low coverage.
 
-
 1.2 (16 July 2017)  
 - Updated mapref to v2.0, now includes 1.5 million sequences.  
 - Added assert checks.  
