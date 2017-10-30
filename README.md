@@ -1,10 +1,10 @@
 
-# MAPseq v1.2 (23 Oct 2017)
+# MAPseq v1.2.2 (30 Oct 2017)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
 Reference:
-Matias Rodrigues JF, Schmidt TSB, Tackmann J, Mering C von. MAPseq: bringing speed, accuracy and consistency to metagenomic ribosomal RNA analysis. submitted.
+Matias Rodrigues JF, Schmidt TSB, Tackmann J & von Mering C (2017) MAPseq: highly efficient k-mer search with confidence estimates, for rRNA sequence analysis. Bioinformatics. http://doi.org/10.1093/bioinformatics/btx517
 
 ---
 ## Table of contents
@@ -142,6 +142,9 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+1.2.2 (30 Oct 2017)
+- Fixed multithreaded race condition causing issues on some systems.
+
 1.2.1 (23 Oct 2017)
 - Updated mapref to v2.2. Fixed several issues with v2.0.
 - Dropped LTP taxonomy due to low coverage.
@@ -155,5 +158,4 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 1.0 (14 October 2016)  
 - First release of MAPseq.  
-
 

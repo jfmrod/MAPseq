@@ -110,6 +110,7 @@ class esearchws
 {
  public:
 //  eintarray best;
+  ernd rng;
   ealignws alignws;
   eintarray otukmerpos;
   uint64_t *kmerbitmask;
@@ -2983,10 +2984,10 @@ void otukmeradd(ebasicarray<deque<int> >& otukmers,int i,eseq& s,eintarray& tmpk
   }
 }
 
-void randomize(eintarray& seqids)
+void randomize(ernd& prnd,eintarray& seqids)
 {
   for (int i=seqids.size()-1; i>0; --i){
-    int r=int(rnd.uniform()*(i+1));
+    int r=int(prnd.uniform()*(i+1));
     if (r!=i) seqids.swap(r,i);
   }
 }
@@ -3232,7 +3233,7 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
   
 //    cout << "# 2nd counting" << endl;
 
-    randomize(seqids);
+    randomize(sws.rng,seqids);
     sws.idcount.init(seqids.size(),0);
   
     if (sws.maskid+1u<sws.maskid){
