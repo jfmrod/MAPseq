@@ -13,6 +13,12 @@ char cnuc2chr(uint32_t cc)
   return(larr[cc&0x3]);
 }
 
+char cnuc2chru(uint32_t cc)
+{
+  const char larr[]={'A','T','G','C'};
+  return(larr[cc&0x3]);
+}
+
 
 bool eseq::operator<(const eseq& s)
 {

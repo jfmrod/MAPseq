@@ -59,6 +59,9 @@ const unsigned long safe_shift[32]={0x0ul,0xfffffffffffffffful,0xfffffffffffffff
 
 unsigned int akmers[MAXSIZE]; // 6bases
 
+int nthreads=4;
+bool nocluster=false;
+estr cutoffs;
 int topotus=10;
 int tophits=20;
 int minscore=30;
@@ -3521,6 +3524,52 @@ void taxscore2(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray
   }
 }
 
+void load_taxformat1(efile& f,eseqdb& db,etax& tax)
+{
+  estr line;
+  estrarray parts,parts2;
+  while (!f.eof()){
+    if (line.len()==0) continue;
+    if (line[0]=='#'){
+      f.readln(line);
+      parts=line.explode(" ");
+      if (parts[0]=="#cutoff:"){
+        ldieif(tax.cutoff.size()>0,"duplicate #cutoff lines!!");
+        for (int i=1; i<parts.size(); ++i){
+          parts2=parts[i].explode(":");
+          ldieif(parts2.size()<2,"not enough parts on #cutoff line, i.e.: 0.97:0.02");
+          tax.cutoff.add(parts2[0].f());
+          tax.cutoffcoef.add(parts2[1].f());
+        }
+      }else if (parts[0]=="#name:" && parts.size()>1){
+        tax.name=parts[1];
+      }else if (parts[0]=="#levels:" && parts.size()>1){
+        for (int i=1; i<parts.size(); ++i)
+          tax.levels.add(parts[i]);
+      }
+      continue; 
+    }
+    parts=line.explode("\t");
+    ldieif(parts.size()<2,"loading taxonomy, not enough fields in line: "+line);
+
+/*  simple taxonomy */
+    eseqtax *newtax=new eseqtax();
+    newtax->tl.reserve(parts.size()-1);
+    for (int i=1; i<parts.size(); ++i)
+      newtax->tl.add(eseqtaxlevel(parts[i].i()));
+
+/* mseq data with predicted confidences        
+    eseqtax *newtax=new eseqtax(parts[1].f());
+    newtax->tl.reserve((parts.size()-2)/2);
+    for (int i=2; i<parts.size(); i+=2)
+      newtax->tl.add(eseqtaxlevel(parts[i].i(),parts[i+1].f()));
+*/
+    int si=parts[0].i();
+    ldieif(si>=db.seqs.size(),"sequence number in taxonomy file does not exist in database, please make sure to recreate the taxonomy file everytime the fasta database changes");
+    tax.seqs[si]=newtax;
+  }
+}
+
 void load_taxa(const estr& taxfile,eseqdb& db)
 {
   efile f;
@@ -3535,6 +3584,10 @@ void load_taxa(const estr& taxfile,eseqdb& db)
     f.readln(line);
     if (line.len()==0) continue;
     if (line[0]=='#'){
+      if (line=="#taxformat1"){
+        load_taxformat1(f,db,tax);
+        break;
+      }
       parts=line.explode(" ");
       if (parts[0]=="#cutoff:"){
         ldieif(tax.cutoff.size()>0,"duplicate #cutoff lines!!");
@@ -3618,7 +3671,6 @@ struct emtdata {
   econdsig sbufferSignal;
   eseqdb *seqdb;
 //  ebasicarray<etax> *taxa;
-  bool noveltaxa;
   bool finished;
   bool print_align;
   bool print_hits;
@@ -3676,7 +3728,61 @@ estr outfmt_confidences(const etax& tax,const earrayof<double,int>& ptax,const e
 
 
 
-void taskSeqsearch()
+void taskCompress()
+{
+  estr outstr;
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(mtdata.seqdb->otus.size()*2)/64+1];
+  searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerpos2.init(MAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
+  while(1){
+    mtdata.m.lock();
+    while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.seqs.size()==0 && mtdata.finished) {mtdata.m.unlock(); return;}
+
+    estrarrayof<eseq> *pbuf=mtdata.seqs[0];
+    mtdata.seqs.erase(0);
+    mtdata.m.unlock();
+    outstr.clear();
+
+    for (int i=0; i<pbuf->size(); ++i){
+      eseq& s(pbuf->values(i));
+      earray<epredinfo> pinfoarr;
+
+      seqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      if (pinfoarr.size()==0){
+        outstr+=">"+pbuf->keys(i)+"\n";
+        outstr+=pbuf->values(i).print_seq()+"\n";
+        continue;
+      }
+  
+      outstr+=">"+pbuf->keys(i)+"\n";
+      epredinfo& pinfo(pinfoarr[0]);
+      pinfo.tophit.profile.inv();
+      outstr+=mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.compress(s)+"\n";
+    }
+
+    mtdata.m.lock();
+    cout << outstr;
+    mtdata.sbuffer.add(pbuf);
+    mtdata.sbufferSignal.signal();
+    mtdata.m.unlock();
+  }
+  delete searchws.bitmask;
+}
+
+void taskSearch()
 {
   estr outstr;
   esearchws searchws;
@@ -3816,6 +3922,9 @@ void taskSeqsearch()
         if (mtdata.print_align){
           pinfo.tophit.profile.inv();
           outstr+=pinfo.tophit.profile.str() + "\n";
+          estr salistr=pinfo.tophit.compress(s);
+          outstr+=salistr+ "\n";
+          outstr+=sali_decompress(salistr,mtdata.seqdb->seqs.values(pinfo.tophit.seqid))+"\n";
           outstr+=pinfo.tophit.align_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
           outstr+="\n";
         }
@@ -3883,74 +3992,297 @@ void help()
   exit(0);
 }
 
-int emain()
+void loadCluster(eseqdb& db,const estr& cfile)
 {
-  getParser().onHelp=help;
-  cout << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
-  initdlt();
-  bool print_hits=false;
-  bool print_align=false;
-  bool nocluster=false;
-  estr cutoffs;
-  epregister(sweight);
-  epregister(nocluster);
-  epregister(otulim);
-  epregister(lambda);
-  epregister(print_hits);
-  epregister(print_align);
-  epregister(minscore);
-  epregister(minid1);
-  epregister(minid2);
-  epregister(cf);
-  epregister2(as.match,"match");
-  epregister2(as.mismatch,"mismatch");
-  epregister2(as.gapext,"gapext");
-  epregister2(as.gapopen,"gapopen");
-  epregister2(as.dropoff,"dropoff");
-  epregister(cutoffs);
-  estr dbfilter;
-  epregister(dbfilter);
-  outfmt.choice=0;
-  outfmt.add("confidences",outfmt_confidences);
-  outfmt.add("simple",outfmt_simple);
+  efile f;
+  f.open(cfile,"r");
+  estr line;
+  eintarray tmpkmers;
+  int i;
 
-  epregisterClassInheritance(eoption<outfmt_fd>,ebaseoption);
-//  epregisterClassMethod4(eoption<outfmt_fd>,operator=,int,(const estr& val),"=");
+  tmpkmers.init(MAXSIZE,0);
+  while (!f.eof() && f.readln(line)){
+    if (line.len()==0) continue;
+    estrarray parts(line.explode(" "));
 
-  epregister(outfmt);
+    int tmpi,repid=-1;
+    for (i=1; i<parts.size(); ++i){
+      tmpi=parts[i].i();
+// //        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax!=0x00) {repid=tmpi; break;}
+//        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
+      repid=tmpi;
+      break;
+    }
+    if (repid==-1) continue; // no sequence found with taxonomic annotation
 
-  epregisterFunc(help);
-  
-//  epregister(galign);
-  bool benchmark=false;
-//  epregister(benchmark);
+    db.otus.add(eintarray());
+    eintarray &tmpo(db.otus[db.otus.size()-1]);
+    tmpo.reserve(parts.size()-1);
+    tmpi=parts[1].i();
+//      otukmeradd(otukmers,otus.size()-1,seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFFFFul);
+//      if (db.otus.size()==0)
+//        otukmeradd(db.otukmers,db.otus.size()-1,db.seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFul);
+//      else{
+//      memset(bitmask,0x0u,(db.seqs.size()/64+1)*sizeof(uint64_t));
+    uint32_t ibest=0u;
+    short bcount=0;
+    int kmerlen=0;
+    eseq &s(db.seqs.values(tmpi));
+//      kmercount_single_nopos(db.otukmers,s,bitmask,idcount,tmpkmers,db.otus.size(),kmerlen,ibest,bcount,akmers,0xFul);
+//      if (idcount.size()==0){
+    otukmeradd(db.otukmers,db.otus.size()-1,s,tmpkmers,db.otus.size(),akmers,0xFul);
+//        tmpkmers.init(MAXSIZE,0);
+//        kmerhash(db.otukmers,db.kmerlast,s,tmpkmers,ti++,db.seqs.size(),akmers,0xFul);
+//      }else
+//        otuaddkmerdiff(db.otukmers,db.seqs.values(db.otus[ibest][0]),s,tmpkmers,i,db.otus.size()-1,akmers,0xFul);
+//      idcount.add(0);
 
-  bool noveltaxa=false;
-//  epregister(noveltaxa);
+      
 
-  int nthreads=4;
-  epregister(nthreads);
-
-  epregister(tophits);
-  epregister(topotus);
-  int step=0;
-
-//  epregister(step);
-
-  estr ignfile;
-//  epregister(ignfile);
-
-//  epregister(kmer);
-  eparseArgs();
-  mtdata.print_align=print_align;
-  mtdata.print_hits=print_hits;
-
-  if(getParser().args.size()<2){
-    cout << "syntax: mapseq <query> [db] [tax] [tax2] ..." << endl;
-    return(0);
+    for (i=1; i<parts.size(); ++i){
+      tmpi=parts[i].i();
+//   //        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax==0x00) continue; // do not add sequence if there is no taxonomic annotation
+//        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
+      ldieif(tmpi>=db.seqs.size(),"cluster file has more sequence ids than original file, please remove cluster file: "+cfile);
+      tmpo.add(tmpi);
+      db.seqotu[tmpi]=db.otus.size()-1;
+    }
   }
-  estr cfile;
+}
 
+
+void makeCluster(eseqdb& db,const estr& cfile)
+{
+    // phase 1: find all cluster seeds, but do not add non-seeds in first phase
+//    eintarray dbotus;
+  eintarray tmpkmers;
+  euintarray idcount;
+  eintarray kmerpos;
+  int i;
+
+  eintarray len_si(iheapsort(db.seqs));
+  db.otus.reserve(db.seqs.size()); // worst case scenario
+  db.otus.add(eintarray(len_si[0]));
+  db.seqotu[len_si[0]]=0;
+//    dbotus.add(len_si[0]);
+
+//    fprintf(stderr,"# adding kmers from %i\n",db.otus[0][0]);
+
+  tmpkmers.init(MAXSIZE,-1);
+  otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
+  idcount.reserve(db.seqs.size());
+  kmerpos.reserve(db.seqs.size());
+  idcount.init(db.otus.size(),0u);
+  kmerpos.init(db.otus.size(),0u);
+//    uint32_t sp=0u;
+//    uint32_t kp=8u;
+  
+  for (i=1; i<db.seqs.size(); ++i){
+    eseq& s(db.seqs.values(len_si[i]));
+    if (i%100==0) 
+      fprintf(stderr,"\rseq: %i otus: %li",i,db.otus.size());
+//      if (sp+1<sp){
+      idcount.init(db.otus.size(),0);
+//        sp=0;
+//      }
+//      if (kp+s.seqlen<kp){
+      kmerpos.init(db.otus.size(),0u);
+//        kp=8u;
+//      }
+
+//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
+//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
+    kmercount_single(db.otukmers,s,idcount,kmerpos);
+//      kp+=s.seqlen;
+
+    int ibest=0;
+    for (int l=1; l<idcount.size(); ++l){
+      if (idcount[l]>idcount[ibest]) ibest=l;
+    }
+/*
+      uint32_t bestcount=0;
+      int l;
+      for (l=0; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp) {
+          ibest=l;
+          bestcount=tc;
+          break;
+        }
+      }
+        
+      for (; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
+//        if (idcount[l]>idcount[ibest]) ibest=l;
+      }
+*/
+    if (float(idcount[ibest])/s.seqlen >= 0.80) {
+//        cout << "# " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
+        // then merge sequence to otu
+//        otus[ibest].add(len_si[i]);
+//        seqotu[len_si[i]]=ibest;
+    } else {
+//        cout << "+ " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
+        // create new otu
+//        idcount.add(0);
+//        kmerpos.add(0);
+      db.otus.add(eintarray(len_si[i]));
+//        otukmercount.add(kmercount);
+      ibest=db.otus.size()-1;
+      db.seqotu[len_si[i]]=ibest;
+      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
+    }
+//      ++sp;
+  }
+  fprintf(stderr,"\rseq: %i clusters: %li\n",i,db.otus.size());
+
+  fprintf(stderr,"phase 2:\n");
+  // phase 2: after finding all seeds, add all non-seeds to the most similar clusters
+  for (i=0; i<db.seqotu.size(); ++i){
+    eseq& s(db.seqs.values(i));
+    if (i%100==0)
+      fprintf(stderr,"\rseq: %i",i);
+    if (db.seqotu[i]!=-1) continue;
+
+//      if (sp+1<sp){
+      idcount.init(db.otus.size(),0);
+//        sp=0;
+//      }
+//      if (kp+s.seqlen<kp){
+      kmerpos.init(db.otus.size(),0u);
+//        kp=8u;
+//      }
+
+//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
+//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
+    kmercount_single(db.otukmers,s,idcount,kmerpos);
+//      kp+=s.seqlen;
+
+    int ibest=0;
+/*
+      uint32_t bestcount=0;
+      int l;
+      for (l=0; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp) {
+          ibest=l;
+          bestcount=tc;
+          break;
+        }
+      }
+        
+      for (; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
+//        if (idcount[l]>idcount[ibest]) ibest=l;
+      }
+*/
+    for (int l=1; l<idcount.size(); ++l){
+      if (idcount[l]>idcount[ibest]) ibest=l;
+    }
+    db.otus[ibest].add(i);
+    db.seqotu[i]=ibest;
+//      ++sp;
+  }
+//    return(0);
+//    db.otus.init(dbotus.size());
+//    for (int i=0; i<db.seqotu.size(); ++i)
+//      db.otus[db.seqotu[i]].add(i);
+
+
+//  if (dbfilter.len()==0){ // do not save cluster file for a filtered db
+    fprintf(stderr,"\rseq: %li clusters: %li\n",db.seqs.size(),(long)db.otus.size());
+    if (cfile.len()){
+      efile f(cfile,"w");
+      for (int i=0; i<db.otus.size(); ++i){
+        f.write(estr(i));
+        for (int j=0; j<db.otus[i].size(); ++j)
+          f.write(" "+estr(db.otus[i][j]));
+        f.write("\n");
+      }
+      f.close();
+    }
+//  }
+}
+
+
+
+
+void loadSequences(eseqdb& db)
+{
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
+  if (getParser().args.size()>2)
+    dbfile=getParser().args[2];
+  else if (!efile(dbfile).exists())
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
+  if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
+
+  estr str2id,str2seq,line;
+  efile f;
+  f.open(dbfile,"r");
+  f.readln(line);
+  while (!f.eof()){
+    str2id=line;
+    ldieif(str2id.len()==0 || str2id[0]!='>',"Unexpected line: "+str2id);
+
+    str2seq.clear();
+    while (f.readln(line) && line.len() && line[0]!='>') str2seq+=line;
+    str2id.del(0,1);
+
+    int i=str2id.findchr(" \t");
+    if (i!=-1l) str2id.del(i); // only keep id up to first white space
+//    if (dbfilter.len() && str2id!=dbfilter) continue;
+
+    db.seqind.add(str2id,db.seqs.size());
+    db.seqs.add(str2id,eseq(str2seq));
+  }
+  f.close();
+
+  db.seqotu.init(db.seqs.size(),-1);
+  db.otukmers.init(MAXSIZE);
+  estr cfile=dbfile+".mscluster";
+  if (nocluster){
+    eintarray tmpkmers;
+    db.otus.reserve(db.seqs.size());
+    db.otus.add(eintarray(0));
+    tmpkmers.init(MAXSIZE,-1);
+    otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
+    for (int i=1; i<db.seqs.size(); ++i){
+      eseq& s(db.seqs.values(i));
+      db.otus.add(eintarray(i));
+      int ibest=db.otus.size()-1;
+      db.seqotu[i]=ibest;
+      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
+    }
+//  } else if (dbfilter.len()==0 && efile(cfile).exists()){ // load clustering
+  } else if (efile(cfile).exists()){ // load clustering
+    loadCluster(db,cfile);
+    ldieif(db.otus.size()==0,"no clusters in database");
+  }else{ // perform clustering
+    fprintf(stderr,"# no clustering file found, performing clustering\n");
+    makeCluster(db,cfile);
+  }
+
+  int fcount=0;
+  int okmercount=0;
+  for (int i=0; i<db.otukmers.size(); ++i){
+    if (db.otukmers[i].size()>0)
+      ++okmercount;
+    if (db.otukmers[i].size()>1000 && db.otukmers[i].size()>db.otus.size()*0.50){
+      db.otukmers[i].clear();
+      ++fcount;
+    }
+  }
+//  cerr << "# fcount: " << fcount << " otukmercount: " << okmercount << endl;
+}
+
+void doInit()
+{
   for (unsigned int i=0; i<MAXSIZE; ++i)
     akmers[i]=0x00u;
   akmers[0x08ul]=1u; // AG
@@ -3968,7 +4300,6 @@ int emain()
   }
 
 //  cout << "4mer shift" << endl;
-
   for (unsigned int i=0u; i<(1u<<8u); ++i){
     if (akmers[i]==1u) continue;
     for (unsigned int j=0u; j<(1u<<8u); ++j){
@@ -3977,427 +4308,32 @@ int emain()
 //      cout << kmer2str((i<<8u)|j) << endl;
     }
   }
+}
 
-
-  
-  efile f;
-  estr line;
-  estrarray args;
-
-  eseqdb db;
-
-//  estrarrayof<eseq> seqs;
-//  ebasicarray<etax> taxa;
-//  ebasicarray<eintarray> taxcounts;
-
-
-  estrhash ignseqs;
-  if (ignfile.len()>0){
-    f.open(ignfile,"r");
-    while (!f.eof()){
-      f.readln(line);
-      ignseqs.add(line,estr());
-    }
-  }
-
-//  estrarrayof<eseq> query;
-/*
-  while(f.readln(line)){
-    if (line.len()==0 || line[0]=='#') continue;
-    args=line.explode(" ");
-    ldieif(args.size()<2,"id and sequence not found in line: "+line);
-    seqs.add(args[0],args[1]);
-  }
-
-  f.open(argv[2],"r");
-  while(f.readln(line)){
-    if (line.len()==0 || line[0]=='#') continue;
-    args=line.explode(" ");
-    ldieif(args.size()<2,"id and sequence not found in line: "+line);
-    query.add(args[0],args[1]);
-  }
-*/
-
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
-  if (getParser().args.size()>2)
-    dbfile=getParser().args[2];
-  else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
-  if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
-
-//  estrhashof<int> seqind;
-  estr str2id,str2seq;
-  int maxseqlen=0;
-  f.open(dbfile,"r");
-  f.readln(line);
-  while (!f.eof()){
- //f.readln(str2id)){
-    str2id=line;
-    ldieif(str2id.len()==0 || str2id[0]!='>',"Unexpected line: "+str2id);
-
-    str2seq.clear();
-    while (f.readln(line) && line.len() && line[0]!='>') str2seq+=line;
-    str2id.del(0,1);
-
-    int i=str2id.findchr(" \t");
-    if (i!=-1l) str2id.del(i); // only keep id up to first white space
-    if (dbfilter.len() && str2id!=dbfilter) continue;
-
-    db.seqind.add(str2id,db.seqs.size());
-    db.seqs.add(str2id,eseq(str2seq));
-
-    if (str2seq.len()>maxseqlen) maxseqlen=str2seq.len();
-//    cout << ">" << str2id << endl;
-//    cout << str2seq << endl;
-//    cout << seqs.values(seqs.size()-1) << endl;
-  }
-  f.close();
-
-  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
-  ldieif(db.seqs.size()==0,"empty database");
-
+void processQuery(eseqdb& db,const estr& fname,void (*taskfunc)())
+{
   etimer t1;
   t1.reset();
 
-//  earray<eintarray> otus;
-//  ebasicarray<eintarray*> otukmers;
-
-  db.otukmers.init(MAXSIZE);
-
-  eintarray tmpkmers;
-//  eintarray kmercounts;
-  int i;
-
-  if (getParser().args.size()>3) {
-    for (int i=3; i<getParser().args.size(); ++i){
-      cerr << "# loading taxonomy file: " << getParser().args[i] << endl;
-      load_taxa(getParser().args[i],db);
-    }
-  }else if (getParser().args.size()<=2){ // do not automatically load taxonomy if database is specified
-    if (efile(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax").exists()){
-      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax",db);
-      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.otutax",db);
-//      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
-    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax").exists()){
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax",db);
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.otutax",db);
-//      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
-    }
-  }
-  if (cutoffs.size()>0 && db.taxa.size()>0){
-    ldieif(db.taxa.size()>1,"more than one taxonomy provided, cant use -cutoffs to specify cutoffs");
-    etax& tax(db.taxa[0]);
-    estrarray parts2;
-    estrarray parts=cutoffs.explode(" ");
-    ldieif(parts.size()<tax.cutoff.size(),"not enough cutoff levels: "+estr(tax.cutoff.size()));
-    tax.cutoff.clear(); tax.cutoffcoef.clear();
-    for (int i=0; i<parts.size(); ++i){
-      parts2=parts[i].explode(":");
-      ldieif(parts2.size()<2,"not enough parts on cutoff argument, i.e.: 0.97:0.02");
-      tax.cutoff.add(parts2[0].f());
-      tax.cutoffcoef.add(parts2[1].f());
-    }
-  }
-
-
-  
-  cerr << "# taxonomies: " << db.taxa.size() << endl;
-  for (int i=0; i<db.taxa.size(); ++i){
-    cerr << "# tax levels: " << db.taxa[i].names.size() << endl;
-//    taxcounts.init(taxa[i].names.size());
-    for (int j=0; j<db.taxa[i].names.size(); ++j){
-      cerr << "# tax: " << i << " level: " << j << " ("<< db.taxa[i].names[j].size() << ")" << endl;
-//      taxcounts[i][j].init(taxa[i].names[j].size(),-1);
-    }
-  }
-
-
-
-  eintarray kmerpos;
-  ebasicarray<uint32_t> idcount;
-
-//  eintarray seqotu;
-  db.seqotu.init(db.seqs.size(),-1);
-
-  tmpkmers.init(MAXSIZE,-1);
-
-
-
-  const int MAXSEQS=1000000;
-  uint64_t bitmask[MAXSEQS/64+1];
-
-
-  cfile=dbfile+".mscluster";
-  if (nocluster){
-    db.otus.reserve(db.seqs.size());
-    db.otus.add(eintarray(0));
-
-    tmpkmers.init(MAXSIZE,-1);
-    otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
-    for (i=1; i<db.seqs.size(); ++i){
-      eseq& s(db.seqs.values(i));
-      db.otus.add(eintarray(i));
-      int ibest=db.otus.size()-1;
-      db.seqotu[i]=ibest;
-      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
-    }
-  } else if (dbfilter.len()==0 && efile(cfile).exists()){ // load clustering
-    efile f;
-    f.open(cfile,"r");
-    estr line;
-    tmpkmers.init(MAXSIZE,0);
-    while (!f.eof() && f.readln(line)){
-      if (line.len()==0) continue;
-      estrarray parts(line.explode(" "));
-
-      int tmpi,repid=-1;
-      for (i=1; i<parts.size(); ++i){
-        tmpi=parts[i].i();
-//        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax!=0x00) {repid=tmpi; break;}
-        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
-        repid=tmpi;
-        break;
-      }
-      if (repid==-1) continue; // no sequence found with taxonomic annotation
-
-      db.otus.add(eintarray());
-      eintarray &tmpo(db.otus[db.otus.size()-1]);
-      tmpo.reserve(parts.size()-1);
-      tmpi=parts[1].i();
-//      otukmeradd(otukmers,otus.size()-1,seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFFFFul);
-//      if (db.otus.size()==0)
-//        otukmeradd(db.otukmers,db.otus.size()-1,db.seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFul);
-//      else{
-//      memset(bitmask,0x0u,(db.seqs.size()/64+1)*sizeof(uint64_t));
-      uint32_t ibest=0u;
-      short bcount=0;
-      int kmerlen=0;
-      eseq &s(db.seqs.values(tmpi));
-//      kmercount_single_nopos(db.otukmers,s,bitmask,idcount,tmpkmers,db.otus.size(),kmerlen,ibest,bcount,akmers,0xFul);
-//      if (idcount.size()==0){
-      otukmeradd(db.otukmers,db.otus.size()-1,s,tmpkmers,db.otus.size(),akmers,0xFul);
-//        tmpkmers.init(MAXSIZE,0);
-//        kmerhash(db.otukmers,db.kmerlast,s,tmpkmers,ti++,db.seqs.size(),akmers,0xFul);
-//      }else
-//        otuaddkmerdiff(db.otukmers,db.seqs.values(db.otus[ibest][0]),s,tmpkmers,i,db.otus.size()-1,akmers,0xFul);
-//      idcount.add(0);
-
-      
-
-      for (i=1; i<parts.size(); ++i){
-        tmpi=parts[i].i();
-//        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax==0x00) continue; // do not add sequence if there is no taxonomic annotation
-        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
-        ldieif(tmpi>=db.seqs.size(),"cluster file has more sequence ids than original file, please remove cluster file: "+cfile);
-        tmpo.add(tmpi);
-        db.seqotu[tmpi]=db.otus.size()-1;
-      }
-    }
-    ldieif(db.otus.size()==0,"no clusters in database");
-  }else{ // perform clustering
-
-    fprintf(stderr,"# no clustering file found, performing clustering\n");
-
-    // phase 1: find all cluster seeds, but do not add non-seeds in first phase
-//    eintarray dbotus;
-    eintarray len_si(iheapsort(db.seqs));
-    db.otus.reserve(db.seqs.size()); // worst case scenario
-    db.otus.add(eintarray(len_si[0]));
-    db.seqotu[len_si[0]]=0;
-//    dbotus.add(len_si[0]);
-
-//    fprintf(stderr,"# adding kmers from %i\n",db.otus[0][0]);
-
-    tmpkmers.init(MAXSIZE,-1);
-    otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
-    idcount.reserve(db.seqs.size());
-    kmerpos.reserve(db.seqs.size());
-    idcount.init(db.otus.size(),0u);
-    kmerpos.init(db.otus.size(),0u);
-//    uint32_t sp=0u;
-//    uint32_t kp=8u;
-  
-    for (i=1; i<db.seqs.size(); ++i){
-      eseq& s(db.seqs.values(len_si[i]));
-      if (i%100==0) 
-        fprintf(stderr,"\rseq: %i otus: %li",i,db.otus.size());
-//      if (sp+1<sp){
-        idcount.init(db.otus.size(),0);
-//        sp=0;
-//      }
-//      if (kp+s.seqlen<kp){
-        kmerpos.init(db.otus.size(),0u);
-//        kp=8u;
-//      }
-
-//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
-//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
-      kmercount_single(db.otukmers,s,idcount,kmerpos);
-//      kp+=s.seqlen;
-
-      int ibest=0;
-      for (int l=1; l<idcount.size(); ++l){
-        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-/*
-      uint32_t bestcount=0;
-      int l;
-      for (l=0; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp) {
-          ibest=l;
-          bestcount=tc;
-          break;
-        }
-      }
-        
-      for (; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
-//        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-*/
-      if (float(idcount[ibest])/s.seqlen >= 0.80) {
-//        cout << "# " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
-        // then merge sequence to otu
-//        otus[ibest].add(len_si[i]);
-//        seqotu[len_si[i]]=ibest;
-      } else {
-//        cout << "+ " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
-        // create new otu
-//        idcount.add(0);
-//        kmerpos.add(0);
-        db.otus.add(eintarray(len_si[i]));
-//        otukmercount.add(kmercount);
-        ibest=db.otus.size()-1;
-        db.seqotu[len_si[i]]=ibest;
-        otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
-      }
-//      ++sp;
-    }
-    fprintf(stderr,"\rseq: %i clusters: %li\n",i,db.otus.size());
-
-    fprintf(stderr,"phase 2:\n");
-    // phase 2: after finding all seeds, add all non-seeds to the most similar clusters
-    for (i=0; i<db.seqotu.size(); ++i){
-      eseq& s(db.seqs.values(i));
-      if (i%100==0)
-        fprintf(stderr,"\rseq: %i",i);
-      if (db.seqotu[i]!=-1) continue;
-
-//      if (sp+1<sp){
-        idcount.init(db.otus.size(),0);
-//        sp=0;
-//      }
-//      if (kp+s.seqlen<kp){
-        kmerpos.init(db.otus.size(),0u);
-//        kp=8u;
-//      }
-
-//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
-//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
-      kmercount_single(db.otukmers,s,idcount,kmerpos);
-//      kp+=s.seqlen;
-
-      int ibest=0;
-/*
-      uint32_t bestcount=0;
-      int l;
-      for (l=0; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp) {
-          ibest=l;
-          bestcount=tc;
-          break;
-        }
-      }
-        
-      for (; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
-//        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-*/
-      for (int l=1; l<idcount.size(); ++l){
-        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-      db.otus[ibest].add(i);
-      db.seqotu[i]=ibest;
-//      ++sp;
-    }
-//    return(0);
-//    db.otus.init(dbotus.size());
-//    for (int i=0; i<db.seqotu.size(); ++i)
-//      db.otus[db.seqotu[i]].add(i);
-
-    if (dbfilter.len()==0){ // do not save cluster file for a filtered db
-      fprintf(stderr,"\rseq: %li clusters: %li\n",db.seqs.size(),(long)db.otus.size());
-      if (cfile.len()){
-        efile f(cfile,"w");
-        for (int i=0; i<db.otus.size(); ++i){
-          f.write(estr(i));
-          for (int j=0; j<db.otus[i].size(); ++j)
-            f.write(" "+estr(db.otus[i][j]));
-          f.write("\n");
-        }
-        f.close();
-      }
-    }
-  }
-
-
-  int fcount=0;
-  int okmercount=0;
-  for (i=0; i<db.otukmers.size(); ++i){
-    if (db.otukmers[i].size()>0)
-      ++okmercount;
-    if (db.otukmers[i].size()>1000 && db.otukmers[i].size()>db.otus.size()*0.50){
-      db.otukmers[i].clear();
-      ++fcount;
-    }
-  }
-  cerr << "# fcount: " << fcount << " otukmercount: " << okmercount << endl;
-
-
-//  earray<estrarray> tax;
-//  earray<estrhashof<int> > taxind;
-
-/*
-  int alen;
-  int match[11];
-  int j,k;
-*/
+  estr cfile;
+  egzfile f;
+  estr line;
+  estrarray args;
 
   t1.reset();
-
-/*
-  eintarray seqkmers;
-  eintarray revseqkmers,revtmpkmers;
-  eintarray tmpkmers2;
-*/
-
   ethreads t;
   emutex m;
  
-  if (estr(getParser().args[1])=="-")
-    f.open(stdin);
+  if (fname=="-")
+    f.open(stdin,"r");
   else
-    f.open(getParser().args[1],"r");
+    f.open(fname,"r");
 
   mtdata.seqdb=&db;
-  mtdata.noveltaxa=noveltaxa;
   mtdata.finished=false;
 
-
   t1.reset();
-//  taskSeqsearchRead(f);
-//  cerr << "# done processing " << " seqs (" << t1.lap()*0.001 << "s)" << endl;
-  
-  t.run(taskSeqsearch,evararray(),nthreads);
+  t.run(taskfunc,evararray(),nthreads);
 
   mtdata.sbuffer.reserve(nthreads*2);
   for (int i=0; i<nthreads*2; ++i){
@@ -4405,28 +4341,6 @@ int emain()
     for (int j=0; j<100; ++j) sarr->add(estr(),eseq());
     mtdata.sbuffer.add(sarr);
   }
-
-  cout << "#query\tdbhit\tbitscore\tidentity\tmatches\tmismatches\tgaps\tquery_start\tquery_end\tdbhit_start\tdbhit_end\tstrand\t";
-  if (outfmt.key()=="simple"){
-    for (int i=0; i<db.taxa.size(); ++i)
-      cout << "\t" << db.taxa[i].name << "\t";
-  }else if (outfmt.key()=="confidences"){
-    for (int i=0; i<db.taxa.size(); ++i){
-      etax& tax(db.taxa[i]);
-      if (tax.levels.size()==0){
-        if (tax.names.size())
-          cout << "\t"<<tax.name<<":taxlevel0\tcombined_cf\tscore_cf";
-        for (int j=1; j<tax.names.size(); ++j)
-          cout << "\ttaxlevel" << j << "\tcombined_cf\tscore_cf";
-      }else{
-        cout << "\t"<< tax.name <<":" << tax.levels[0] << "\tcombined_cf\tscore_cf";
-        for (int j=1; j<tax.levels.size(); ++j)
-          cout << "\t" << tax.levels[j] << "\tcombined_cf\tscore_cf";
-      }
-      cout << "\t";
-    }
-  }
-  cout << endl;
 
 
 //  cerr << "# processing input... ";
@@ -4438,6 +4352,7 @@ int emain()
   int cbufind=0;
   const int MAXSEQLEN=100000;
   long seqstart;
+  estr str2seq,str2id;
   str2seq.reserve(MAXSEQLEN);
   while (!f.eof()){
     if (cbuf==0x00){
@@ -4512,6 +4427,218 @@ int emain()
   f.close();
   t.wait();
   cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
+}
+
+void loadTaxonomy(eseqdb& db)
+{
+  if (getParser().args.size()>3) {
+    for (int i=3; i<getParser().args.size(); ++i){
+      cerr << "# loading taxonomy file: " << getParser().args[i] << endl;
+      load_taxa(getParser().args[i],db);
+    }
+  }else if (getParser().args.size()<=2){ // do not automatically load taxonomy if database is specified
+    if (efile(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax").exists()){
+      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax",db);
+      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.otutax",db);
+//      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
+    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax").exists()){
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax",db);
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.otutax",db);
+//      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
+    }
+  }
+  if (cutoffs.size()>0 && db.taxa.size()>0){
+    ldieif(db.taxa.size()>1,"more than one taxonomy provided, cant use -cutoffs to specify cutoffs");
+    etax& tax(db.taxa[0]);
+    estrarray parts2;
+    estrarray parts=cutoffs.explode(" ");
+    ldieif(parts.size()<tax.cutoff.size(),"not enough cutoff levels: "+estr(tax.cutoff.size()));
+    tax.cutoff.clear(); tax.cutoffcoef.clear();
+    for (int i=0; i<parts.size(); ++i){
+      parts2=parts[i].explode(":");
+      ldieif(parts2.size()<2,"not enough parts on cutoff argument, i.e.: 0.97:0.02");
+      tax.cutoff.add(parts2[0].f());
+      tax.cutoffcoef.add(parts2[1].f());
+    }
+  }
+
+  cerr << "# taxonomies: " << db.taxa.size() << endl;
+  for (int i=0; i<db.taxa.size(); ++i){
+    cerr << "# tax levels: " << db.taxa[i].names.size() << endl;
+//    taxcounts.init(taxa[i].names.size());
+    for (int j=0; j<db.taxa[i].names.size(); ++j){
+      cerr << "# tax: " << i << " level: " << j << " ("<< db.taxa[i].names[j].size() << ")" << endl;
+//      taxcounts[i][j].init(taxa[i].names[j].size(),-1);
+    }
+  }
+}
+
+void printSearchHeader(eseqdb& db)
+{
+  cout << "#query\tdbhit\tbitscore\tidentity\tmatches\tmismatches\tgaps\tquery_start\tquery_end\tdbhit_start\tdbhit_end\tstrand\t";
+  if (outfmt.key()=="simple"){
+    for (int i=0; i<db.taxa.size(); ++i)
+      cout << "\t" << db.taxa[i].name << "\t";
+  }else if (outfmt.key()=="confidences"){
+    for (int i=0; i<db.taxa.size(); ++i){
+      etax& tax(db.taxa[i]);
+      if (tax.levels.size()==0){
+        if (tax.names.size())
+          cout << "\t"<<tax.name<<":taxlevel0\tcombined_cf\tscore_cf";
+        for (int j=1; j<tax.names.size(); ++j)
+          cout << "\ttaxlevel" << j << "\tcombined_cf\tscore_cf";
+      }else{
+        cout << "\t"<< tax.name <<":" << tax.levels[0] << "\tcombined_cf\tscore_cf";
+        for (int j=1; j<tax.levels.size(); ++j)
+          cout << "\t" << tax.levels[j] << "\tcombined_cf\tscore_cf";
+      }
+      cout << "\t";
+    }
+  }
+  cout << endl;
+}
+
+
+void actionCompress()
+{
+  cerr << "Compressing: loading database" << endl;
+
+  doInit();
+
+  eseqdb db;
+  loadSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  processQuery(db,getParser().args[1],taskCompress);
+  exit(0);
+}
+
+void actionDecompress()
+{
+  cerr << "Decompressing: loading database" << endl;
+
+  doInit();
+
+  eseqdb db;
+  loadSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+
+  efile f;
+  estr line;
+  estrarray arr;
+  f.open(getParser().args[1],"r");
+  while (!f.eof()){
+    f.readln(line);
+    if (line.len()==0 || line[0]=='#') continue;
+    if (line[0]=='>') { 
+      cout << line << endl;
+      continue;
+    }
+    int i=line.find("\t");
+    if (i==-1) {
+      cout << line << endl;
+      continue;
+    }
+    ldieif(!db.seqind.exists(line.substr(0,i)),"reference sequence not found, make sure to use the same database used in compression");
+    int sid=db.seqind[line.substr(0,i)];
+    cout << sali_decompress(line.substr(i+1),db.seqs.values(sid)) << endl;
+  }
+  exit(0);
+}
+
+
+int emain()
+{
+  getParser().onHelp=help;
+  cout << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
+  initdlt();
+  epregister(sweight);
+  epregister(nocluster);
+  epregister(otulim);
+  epregister(lambda);
+  epregister2(mtdata.print_hits,"print_hits");
+  epregister2(mtdata.print_align,"print_align");
+  epregister(minscore);
+  epregister(minid1);
+  epregister(minid2);
+  epregister(cf);
+  epregister2(as.match,"match");
+  epregister2(as.mismatch,"mismatch");
+  epregister2(as.gapext,"gapext");
+  epregister2(as.gapopen,"gapopen");
+  epregister2(as.dropoff,"dropoff");
+  epregister(cutoffs);
+  estr dbfilter;
+  epregister(dbfilter);
+  outfmt.choice=0;
+  outfmt.add("confidences",outfmt_confidences);
+  outfmt.add("simple",outfmt_simple);
+
+  getParser().actions.add("compress",actionCompress);
+  getParser().actions.add("decompress",actionDecompress);
+
+  epregisterClassInheritance(eoption<outfmt_fd>,ebaseoption);
+//  epregisterClassMethod4(eoption<outfmt_fd>,operator=,int,(const estr& val),"=");
+
+  epregister(outfmt);
+
+  epregisterFunc(help);
+  
+//  epregister(galign);
+  bool benchmark=false;
+//  epregister(benchmark);
+
+  epregister(nthreads);
+
+  epregister(tophits);
+  epregister(topotus);
+  int step=0;
+
+//  epregister(step);
+
+  estr ignfile;
+//  epregister(ignfile);
+
+//  epregister(kmer);
+  eparseArgs();
+
+  if(getParser().args.size()<2){
+    cout << "syntax: mapseq <query> [db] [tax] [tax2] ..." << endl;
+    return(0);
+  }
+
+  doInit();
+
+  eseqdb db;
+
+/*
+  estrhash ignseqs;
+  if (ignfile.len()>0){
+    f.open(ignfile,"r");
+    while (!f.eof()){
+      f.readln(line);
+      ignseqs.add(line,estr());
+    }
+  }
+*/
+
+  loadSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+
+  loadTaxonomy(db);
+
+//  eintarray kmerpos;
+//  ebasicarray<uint32_t> idcount;
+
+//  const int MAXSEQS=1000000;
+//  uint64_t bitmask[MAXSEQS/64+1];
+
+  printSearchHeader(db);
+
+  processQuery(db,getParser().args[1],taskSearch);
+
   exit(0);
 
   return(0);

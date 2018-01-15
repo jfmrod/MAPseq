@@ -52,6 +52,7 @@ class eseq
 };
 
 char cnuc2chr(uint32_t cc);
+char cnuc2chru(uint32_t cc);
 
 ostream& operator<<(ostream& stream,const eseq& seq);
 
