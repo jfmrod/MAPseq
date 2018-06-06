@@ -9,6 +9,7 @@
 #include <eutils/ethread.h>
 #include <eutils/esystem.h>
 #include <eutils/eoption.h>
+#include <eutils/edaemon.h>
 #include <deque>
 #include <unistd.h>
 
@@ -59,6 +60,9 @@ const unsigned long safe_shift[32]={0x0ul,0xfffffffffffffffful,0xfffffffffffffff
 
 unsigned int akmers[MAXSIZE]; // 6bases
 
+int nthreads=4;
+bool nocluster=false;
+estr cutoffs;
 int topotus=10;
 int tophits=20;
 int minscore=30;
@@ -97,7 +101,7 @@ class etax
  public:
   estr name;
   earray<estr> levels;
-  earray<estrarray> names;
+  earray<earray<estr> > names;
   earray<estrhashof<int> > ind;
   ebasicarray<eseqtax*> seqs;
   efloatarray cutoff;
@@ -122,6 +126,9 @@ class esearchws
   unsigned int offset;
   euintarray kmerpos;
   euintarray kmerposrev;
+  unsigned int offset3;
+  euintarray kmerpos3;
+  euintarray kmerposrev3;
   unsigned int offset2;
   euintarray kmerpos2;
   ebasicarray<eintarray> taxcounts;
@@ -239,6 +246,14 @@ estr kmer2str(uint32_t kmer)
   }
   return(tmpstr);
 }
+
+class eseqcluster
+{
+ public:
+  eintarray seqotu;
+  ebasicarray<deque<uint32_t> > otukmers;
+  earray<eintarray> otus;
+};
 
 class eseqdb
 {
@@ -1745,30 +1760,16 @@ void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndat
 }
 */
 
-void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarray& kmerpos1,esearchws& sws,ebasicarray<ediag> &diags)
 {
   long p1,p2;
   unsigned long *pstr1=reinterpret_cast<unsigned long*>(s1.seq._str);
   unsigned long *pstr2=reinterpret_cast<unsigned long*>(s2.seq._str);
   unsigned long v1,v2;
   long lastkmerlen,lastkmerpos,lastndelta;
-  if (s1_end==0) s1_end=s1.seqlen;
   long s1_len=s1_end-s1_start;
-
-//  for (int i=0; i<11; ++i)
-//    match[i]=0;
-  adata.matches=0; adata.mismatches=0; adata.gaps=0; adata._score=0.0;
-  adata.s1=-1; adata.e1=-1;
-  adata.s2=-1; adata.e2=-1;
-
-  char tmp[5];
-  char itmp;
   int k;
 
-  ebasicarray<ediag> diags;
-  ebasicarray<ediag> dheap;
-
-  LDEBUG(D_PROFILE,t2.reset());
   if (s1_len<s2.seqlen){
     lastkmerpos=s1_start-2*long(KMERSIZE);
     lastkmerlen=0;
@@ -1869,16 +1870,15 @@ void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray&
       diags.add(ediag(lastkmerpos-lastkmerlen+KMERSIZE-lastndelta,lastndelta,lastkmerlen));
     }
   }
-  LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
 
-  if (diags.size()==0){
-//    lderror("no shared segments found");
-    return;
-  }
+}
 
+ediag *sparse_dynamic_prog(ebasicarray<ediag> &diags,const ealignscore& as)
+{
   // sparse dynamic programming to find longest chain of segments
-  ediag *bestseg=&diags[0];
   multimap<long,ediag*> segments;
+
+  ediag *bestseg=&diags[0];
   for (long j=0; j<diags.size(); ++j){
     ediag& diag(diags.at(j));
     diag.V=(diag.j-diag.i)*as.match;
@@ -1941,6 +1941,199 @@ void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray&
       }
     }
   }
+  return(bestseg);
+}
+
+void seqident_local_leftext(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+{
+  if (s1_end==0) s1_end=s1.seqlen;
+  long s1_len=s1_end-s1_start;
+
+  adata.matches=0; adata.mismatches=0; adata.gaps=0; adata._score=0.0;
+  adata.s1=-1; adata.e1=-1;
+  adata.s2=-1; adata.e2=-1;
+
+  char tmp[5];
+  char itmp;
+  ebasicarray<ediag> diags;
+
+  LDEBUG(D_PROFILE,t2.reset());
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
+
+  if (diags.size()==0){
+    return;
+  }
+
+  ediag *bestseg=sparse_dynamic_prog(diags,as);
+  LDEBUG(D_PROFILE,tdp2=tdp2*0.99+t2.lap()*0.01);
+
+
+  float tmpflanks=0.0;
+  ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2)+" s1 id: "+s1id+" s2 id: "+s2id);
+  long minright=MIN(s1.seqlen-bestseg->j,s2.seqlen-bestseg->j2);
+//  seqcalign_global_norightedgegap(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,alignws);
+  seqcalign_global_norightedgegap(s1,bestseg->j,MIN(s1.seqlen,bestseg->j+2*minright),s2,bestseg->j2,MIN(s2.seqlen,bestseg->j2+2*minright),adata,sws.alignws,as);
+//  seqcalign_local_rightext(s1,bestseg->j,MIN(s1.seqlen,bestseg->j+2*minright),s2,bestseg->j2,MIN(s2.seqlen,bestseg->j2+2*minright),adata,sws.alignws,as);
+  LDEBUG(D_PROFILE,tmpflanks+=t2.lap());
+  adata.profile.add(AT_RIGHT);
+  LDEBUG(D_SEQIDENT,cout << "rightid: " << bestseg->j << "," << s1_end << " l: " << s1_end-bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+  while (bestseg!=0x00 && bestseg->bestseg != 0x00){
+    seqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,as);
+    adata.profile.add(AT_ID);
+    LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+    long gapdiff=abs((bestseg->bestseg->i-bestseg->bestseg->i2)-(bestseg->i-bestseg->i2));
+//    if (gapdiff==0) {/* fast alignment no gaps */
+//      seqident_seg_nogaps(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,as);
+//      adata.profile.add(AT_ALIGNF);
+//    } else { /* full sw alignment */
+      seqcalign_global(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,sws.alignws,as);
+      adata.profile.add(AT_ALIGN);
+//    }
+    LDEBUG(D_SEQIDENT,cout << "segid: " << bestseg->bestseg->j << "," << bestseg->i << " l: " << bestseg->i-bestseg->bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << " gapdiff: " << gapdiff << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//    cout << "segid: " << bestseg->i << "," << bestseg->j << " l: " << bestseg->j-bestseg->i << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl;
+    bestseg=bestseg->bestseg;
+  }
+  seqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,as);
+  adata.profile.add(AT_ID);
+  LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+
+
+  
+  LDEBUG(D_PROFILE,tdpmd=tdpmd*0.99+t2.lap()*0.01);
+//  seqident_seg_left_local(s1,bestseg->i,s2,bestseg->i2,adata,tncounts);
+  long minleft=MIN(bestseg->i,bestseg->i2);
+  adata.s1=bestseg->i; adata.s2=bestseg->i2;
+  seqcalign_local_leftext(s1,MAX(0,bestseg->i-2*minleft),bestseg->i,s2,MAX(0,bestseg->i2-2*minleft),bestseg->i2,adata,sws.alignws,as);
+//  seqcalign_global_noleftedgegap(s1,MAX(0,bestseg->i-2*minleft),bestseg->i,s2,MAX(0,bestseg->i2-2*minleft),bestseg->i2,as,as);
+//  seqcalign_global_noleftedgegap(s1,0,bestseg->i,s2,0,bestseg->i2,as1,as2);
+  adata.profile.add(AT_LEFT);
+  LDEBUG(D_PROFILE,tmpflanks+=t2.lap());
+  tdpfl=tdpfl*0.99+tmpflanks*0.01;
+
+//  estr as1,as2;
+//  cout << endl;
+//  cout << as1 << endl << as2 << endl;
+  LDEBUG(D_SEQIDENT,cout << "leftid: "<< bestseg->i << " l: " << (bestseg->i<bestseg->i2?bestseg->i:bestseg->i2) << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//  cout << "partial alignment" << endl;
+//  print_seqali(pas1,pas2);
+
+  return;
+}
+
+void seqident_local_rightext(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+{
+  if (s1_end==0) s1_end=s1.seqlen;
+  long s1_len=s1_end-s1_start;
+
+  adata.matches=0; adata.mismatches=0; adata.gaps=0; adata._score=0.0;
+  adata.s1=-1; adata.e1=-1;
+  adata.s2=-1; adata.e2=-1;
+
+  char tmp[5];
+  char itmp;
+  ebasicarray<ediag> diags;
+
+  LDEBUG(D_PROFILE,t2.reset());
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
+
+  if (diags.size()==0){
+    return;
+  }
+
+  ediag *bestseg=sparse_dynamic_prog(diags,as);
+  LDEBUG(D_PROFILE,tdp2=tdp2*0.99+t2.lap()*0.01);
+
+
+  float tmpflanks=0.0;
+  ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2)+" s1 id: "+s1id+" s2 id: "+s2id);
+  long minright=MIN(s1.seqlen-bestseg->j,s2.seqlen-bestseg->j2);
+//  seqcalign_global_norightedgegap(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,alignws);
+//  seqcalign_global_norightedgegap(s1,bestseg->j,MIN(s1.seqlen,bestseg->j+2*minright),s2,bestseg->j2,MIN(s2.seqlen,bestseg->j2+2*minright),adata,sws.alignws);
+  seqcalign_local_rightext(s1,bestseg->j,MIN(s1.seqlen,bestseg->j+2*minright),s2,bestseg->j2,MIN(s2.seqlen,bestseg->j2+2*minright),adata,sws.alignws,as);
+  LDEBUG(D_PROFILE,tmpflanks+=t2.lap());
+  adata.profile.add(AT_RIGHT);
+  LDEBUG(D_SEQIDENT,cout << "rightid: " << bestseg->j << "," << s1_end << " l: " << s1_end-bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+  while (bestseg!=0x00 && bestseg->bestseg != 0x00){
+    seqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,as);
+    adata.profile.add(AT_ID);
+    LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+    long gapdiff=abs((bestseg->bestseg->i-bestseg->bestseg->i2)-(bestseg->i-bestseg->i2));
+//    if (gapdiff==0) {/* fast alignment no gaps */
+//      seqident_seg_nogaps(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,as);
+//      adata.profile.add(AT_ALIGNF);
+//    } else { /* full sw alignment */
+      seqcalign_global(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,sws.alignws,as);
+      adata.profile.add(AT_ALIGN);
+//    }
+    LDEBUG(D_SEQIDENT,cout << "segid: " << bestseg->bestseg->j << "," << bestseg->i << " l: " << bestseg->i-bestseg->bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << " gapdiff: " << gapdiff << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//    cout << "segid: " << bestseg->i << "," << bestseg->j << " l: " << bestseg->j-bestseg->i << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl;
+    bestseg=bestseg->bestseg;
+  }
+  seqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,as);
+  adata.profile.add(AT_ID);
+  LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+
+
+  
+  LDEBUG(D_PROFILE,tdpmd=tdpmd*0.99+t2.lap()*0.01);
+//  seqident_seg_left_local(s1,bestseg->i,s2,bestseg->i2,adata,tncounts);
+  long minleft=MIN(bestseg->i,bestseg->i2);
+  adata.s1=bestseg->i; adata.s2=bestseg->i2;
+//  seqcalign_local_leftext(s1,MAX(0,bestseg->i-2*minleft),bestseg->i,s2,MAX(0,bestseg->i2-2*minleft),bestseg->i2,adata,sws.alignws,as);
+  seqcalign_global_noleftedgegap(s1,MAX(0,bestseg->i-2*minleft),bestseg->i,s2,MAX(0,bestseg->i2-2*minleft),bestseg->i2,adata,sws.alignws,as);
+//  seqcalign_global_noleftedgegap(s1,0,bestseg->i,s2,0,bestseg->i2,as1,as2);
+  adata.profile.add(AT_LEFT);
+  LDEBUG(D_PROFILE,tmpflanks+=t2.lap());
+  tdpfl=tdpfl*0.99+tmpflanks*0.01;
+
+//  estr as1,as2;
+//  cout << endl;
+//  cout << as1 << endl << as2 << endl;
+  LDEBUG(D_SEQIDENT,cout << "leftid: "<< bestseg->i << " l: " << (bestseg->i<bestseg->i2?bestseg->i:bestseg->i2) << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//  cout << "partial alignment" << endl;
+//  print_seqali(pas1,pas2);
+
+  return;
+}
+
+
+void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+{
+  if (s1_end==0) s1_end=s1.seqlen;
+  long s1_len=s1_end-s1_start;
+
+//  for (int i=0; i<11; ++i)
+//    match[i]=0;
+  adata.matches=0; adata.mismatches=0; adata.gaps=0; adata._score=0.0;
+  adata.s1=-1; adata.e1=-1;
+  adata.s2=-1; adata.e2=-1;
+
+  char tmp[5];
+  char itmp;
+  ebasicarray<ediag> diags;
+
+  LDEBUG(D_PROFILE,t2.reset());
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
+
+  if (diags.size()==0){
+//    lderror("no shared segments found");
+    return;
+  }
+
+  ediag *bestseg=sparse_dynamic_prog(diags,as);
   LDEBUG(D_PROFILE,tdp2=tdp2*0.99+t2.lap()*0.01);
 
 //  estr fas1,fas2;
@@ -2087,6 +2280,53 @@ void kmercount_mask(estrarrayof<eseq>& seqs,eintarray& seqids,uint64_t *kmermask
           kmerpos=p+k;
         }
       }
+    }
+  }
+}
+
+void kmercount_mask_single(eseq& s,euintarray& kmermask,unsigned int maskpos,int idcount[2])
+{
+  int k;
+  long p;
+  long kmerpos,kmerposrev;
+  idcount[0]=0;
+  idcount[1]=0;
+  unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
+  unsigned long v;
+  kmerpos=-long(KMERSIZE2);
+  kmerposrev=-long(KMERSIZE2);
+  for (p=0; p+32<s.seqlen; p+=32-KMERSIZE2){
+    v=pstr[p/32u]>>(2u*(p%32u));
+    v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+    for (k=0; k+KMERSIZE2<32; ++k,v>>=2u){
+      if (kmermask[v&KMERMASK2]>maskpos){
+        unsigned long d=p+k-kmerpos;
+        if (d>KMERSIZE2) d=KMERSIZE2;
+        idcount[0]+=d;
+        kmerpos=p+k;
+      }
+      if (kmermask[kmer_rev_lt2[v&KMERMASK2]]>maskpos){
+        unsigned long d=p+k-kmerposrev;
+        if (d>KMERSIZE2) d=KMERSIZE2;
+        idcount[1]+=d;
+        kmerposrev=p+k;
+      }
+    }
+  }
+  v=pstr[p/32u]>>(2u*(p%32u));
+  v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+  for (k=0; p+k+KMERSIZE2<s.seqlen; ++k,v>>=2u){
+    if (kmermask[v&KMERMASK2]>maskpos){
+      unsigned long d=p+k-kmerpos;
+      if (d>KMERSIZE2) d=KMERSIZE2;
+      idcount[0]+=d;
+      kmerpos=p+k;
+    }
+    if (kmermask[kmer_rev_lt2[v&KMERMASK2]]>maskpos){
+      unsigned long d=p+k-kmerposrev;
+      if (d>KMERSIZE2) d=KMERSIZE2;
+      idcount[1]+=d;
+      kmerposrev=p+k;
     }
   }
 }
@@ -3139,7 +3379,320 @@ void calc_score_bs(unsigned char* tncounts,int p,int e,edoublearray &scores,unsi
 }
 */
 
+
+void seqalign(eseq& s,eseq& s2,epredinfo& pinfo,esearchws& sws)
+{
+  long s_start=0;
+  long s_end=s.seqlen;
+  long s_len=s_end-s_start;
+  eseq srev;
+  srev.setrevcompl(s,s_start,s_end);
+  
+  if (sws.offset+(unsigned int)(s_len)<sws.offset){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
+    sws.offset=1u;
+    sws.kmerpos.init(MAXSIZE,0u);
+    sws.kmerposrev.init(MAXSIZE,0u);
+  }
+  setkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
+  setkmerpos(sws.kmerposrev,srev,sws.offset);
+ 
+  ealigndata adata;
+  adata.seqid=-1;
+//  adata.revcompl=(seqids[best[l]]>=db.seqs.size());
+  adata.revcompl=false;
+  adata.kmercount=0;
+//  adata.kmercount=sws.idcount[best[l]];
+    
+//  if (seqids[best[l]]<db.seqs.size()){
+    seqident_local(estr(),estr(),s,sws.kmerpos,s2,adata,sws,as,s_start,s_end);
+//  }else{
+//    seqident_local(str2id,db.seqs.keys(sbest),srev,sws.kmerposrev,s2,adata,sws,as);
+      // flip 
+//    int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
+//    adata.revcompl=true;
+//  }
+  if (adata.matches+adata.mismatches>0 && adata.score()>=minscore){
+    adata._eval=s2.seqlen*exp(-lambda*adata.score()); // for K-A stats we need (*s.seqlen) but this is constant
+    pinfo.matchcounts.add(adata);
+  }
+  sws.offset+=s_len;
+}
+
+
+
+
 const int SEQSEGSIZE=1500;
+
+
+void seqsearchpair(const estr& id,eseqdb& db,eseq& s,eseq& s2,earray<epredinfo>& pinfoarr,esearchws& sws)
+{
+  t1.reset();
+  pinfoarr.clear();
+//  memset(sws.bitmask,0,((db.otus.size()*2)/64+1)*sizeof(uint64_t));
+//  kmercount_both(db.otus.size(),db.otukmers,s,sws.idcount2,sws.bitmask,akmers,0x0Fu);
+//  kmercount_both2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
+//  kmercount_both_nopos2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
+  ldieif(s.seqlen>SEQSEGSIZE || s2.seqlen>SEQSEGSIZE,"paired end reads longer than "+estr(SEQSEGSIZE)+" not supported");
+
+  long segi=0;
+    epredinfo pinfo;
+    long s_start=0 , s_start2=0;
+    long s_end=s.seqlen,  s_end2=s2.seqlen;
+    long s_len=s.seqlen,  s_len2=s2.seqlen;
+    
+//    int step=1;
+    int step=(s_len+s_len2)/150+1;
+//    if (s_len<150) step=
+    eseq srev,srev2;
+    srev.setrevcompl(s,s_start,s_end);
+    srev2.setrevcompl(s2,s_start,s_end);
+//    cout << "# " << str2id << " start: " << s_start << " end: " << s_end << " len: " << s_len << " seqlen: " << s.seqlen << " srev: " << srev.seqlen << endl;
+  
+    sws.otukmerpos.init(db.otus.size()*2,0);
+    sws.idcount.init(db.otus.size()*2,0);
+
+//    cout << "# counting" << endl;
+    kmercount_both_nopos2_skip(db.otus.size(),db.otukmers,s,s_start,s_end,sws.idcount,sws.otukmerpos,akmers,0x0Fu,step);
+    kmercount_both_nopos2_skip(db.otus.size(),db.otukmers,s2,s_start2,s_end2,sws.idcount,sws.otukmerpos,akmers,0x0Fu,step);
+    ti=ti*0.99+t1.lap()*0.01;
+  
+    eintarray best;
+  //  ebasicarray<ealigndata> matchcounts;
+  
+    // choosing sequences for kmercounting step
+  //  eintarray& best(sws.best);
+  //  eintarray bestcount;
+  //  best.clear();
+    int l;
+    for (l=0; l<sws.idcount.size(); ++l){
+  //    uint16_t bt=(sws.bitmask[l/64u]>>(l%64u))&0x1ul;
+      if (sws.idcount[l]>=minid1) { best.add(l); ++l; break; }
+    }
+    for (; l<sws.idcount.size(); ++l){
+  //    uint16_t bt=(sws.bitmask[l/64u]>>(l%64u))&0x1ul;
+      if (sws.idcount[l]<minid1 || (sws.idcount[l]<sws.idcount[best[best.size()-1]] && best.size()==3*topotus)) continue; // worst id than the bottom of the list
+  
+      int j;
+      for (j=0; j<best.size() && sws.idcount[l]<sws.idcount[best[j]]; ++j);
+  
+      if (best.size()<3*topotus)
+        best.add(l);
+      for (int tj=best.size()-1; tj>j; --tj)
+        best[tj]=best[tj-1];
+      best[j]=l;
+    }
+    if (best.size()==0)
+      return;
+    ts=ts*0.99+t1.lap()*0.01;
+
+    eintarray seqids;
+    for (int l=0; l<best.size() && l<topotus; ++l){
+      int ibest=best[l];
+      if (ibest<db.otus.size()){
+  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest][0]) << "\t" << idcount[ibest] << endl;
+        for (int l2=0; l2<db.otus[ibest].size() && (otulim==0 || l2<otulim); ++l2)
+          seqids.add(db.otus[ibest][l2]);
+      }else{
+  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest-otus.size()][0]) << "\t" << idcount[ibest] << " reversed" << endl;
+        ibest-=db.otus.size();
+        for (int l2=0; l2<db.otus[ibest].size() && (otulim==0 || l2<otulim); ++l2)
+          seqids.add(db.seqs.size()+db.otus[ibest][l2]);
+      }
+    }
+  
+    // add representatives from all non-chosen OTUS (may improve confidence and novel otu estimation)
+  /*
+    for (int l=topotus; l<best.size(); ++l){
+      int ibest=best[l];
+      if (ibest<db.otus.size()){
+        if (db.otus[ibest].size()==0 || sws.idcount[ibest]==0) continue;
+        seqids.add(db.otus[ibest][0]);
+      } else {
+  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest-otus.size()][0]) << "\t" << idcount[ibest] << " reversed" << endl;
+        ibest-=db.otus.size();
+        if (db.otus[ibest].size()==0 || sws.idcount[ibest]==0) continue;
+        seqids.add(db.seqs.size()+db.otus[ibest][0]);
+      }
+    }
+  */
+  
+//    cout << "# 2nd counting" << endl;
+
+    randomize(sws.rng,seqids);
+    sws.idcount.init(seqids.size(),0);
+  
+    if (sws.maskid+1u<sws.maskid){
+      sws.maskid=1u;
+      sws.kmermask.init(KMERSIZE,0u);
+    }
+    ++sws.maskid;
+  
+    ti2=ti2*0.99+t1.lap()*0.01;
+  //  memset(sws.kmerbitmask,0,(MAXSIZE2/64+1)*sizeof(uint64_t));
+  //  setkmermask(sws.kmerbitmask,s,akmers,0xFul);
+  //  kmercount_mask(db.seqs,seqids,sws.kmerbitmask,sws.maskid,sws.idcount,akmers,0xFul);
+//    cout << "# 2nd counting -- setkmermask" << endl;
+    setkmermask(sws.kmermask,s,sws.maskid,akmers,0xFul,s_start,s_end);
+//    cout << "# 2nd counting -- kmercount_mask" << endl;
+    kmercount_mask(db.seqs,seqids,sws.kmermask,sws.maskid,sws.idcount);
+
+    if (sws.maskid+1u<sws.maskid){
+      sws.maskid=1u;
+      sws.kmermask.init(KMERSIZE,0u);
+    }
+    ++sws.maskid;
+
+    setkmermask(sws.kmermask,s2,sws.maskid,akmers,0xFul,s_start2,s_end2);
+//    cout << "# 2nd counting -- kmercount_mask" << endl;
+    kmercount_mask(db.seqs,seqids,sws.kmermask,sws.maskid,sws.idcount);
+
+ 
+    ts2=ts2*0.99+t1.lap()*0.01;
+  
+  /*
+    int ibest=0;
+    for (int l=1; l<sws.idcount.size(); ++l)
+      if (sws.idcount[l]>sws.idcount[ibest]) ibest=l;
+  
+    if (sws.idcount[ibest]<1) {
+      pinfo.seqid=-2;
+      return;  // no hits in db found, skip query
+    }
+  */
+  
+    best.clear();
+    for (l=0; l<sws.idcount.size(); ++l){
+      if (sws.idcount[l]>=minid2){ best.add(l); ++l; break; }
+    }
+    for (; l<sws.idcount.size(); ++l){
+  //    if (idcount[l]<idcount[best[best.size()-1]] && (idcount[l]<0.8*idcount[ibest] && best.size()>=20 || best.size()==100)) continue; // worse id than the bottom of the list
+      if (sws.idcount[l]<minid2 || (sws.idcount[l]<sws.idcount[best[best.size()-1]] && best.size()>=tophits)) continue; // zero counts or worse id than the bottom of the list
+  
+      int j;
+      for (j=0; j<best.size() && sws.idcount[l]<sws.idcount[best[j]]; ++j);
+  
+  //    if (best.size()<20 || idcount[l]<0.8*idcount[ibest] && best.size()<100)
+      if (best.size()<tophits)
+        best.add(l);
+      for (int tj=best.size()-1; tj>j; --tj)
+        best[tj]=best[tj-1];
+      best[j]=l;
+    }
+    if (best.size()==0)
+      return;
+
+/*  
+    for (l=0; l<sws.idcount.size(); ++l){
+      if (db.seqs.keys(seqids[l]%db.seqs.size())==str2id){
+        cout << "# topmatch2: " << sws.idcount[best[0]] << endl;
+        cout << "#" << str2id << " selfmatch2: " << sws.idcount[l] << endl;
+        break;
+      }
+    }
+*/
+
+    if (sws.offset+(unsigned int)(s_len)<sws.offset){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
+      sws.offset=1u;
+      sws.kmerpos.init(MAXSIZE,0u);
+      sws.kmerposrev.init(MAXSIZE,0u);
+    }
+//    cout << "# 2nd counting -- setkmerpos" << endl;
+    setkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
+//    cout << "# 2nd counting -- setkmerposrev" << endl;
+    setkmerpos(sws.kmerposrev,srev,sws.offset);
+   
+    if (sws.offset3+(unsigned int)(s_len2)<sws.offset3){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
+      sws.offset3=1u;
+      sws.kmerpos3.init(MAXSIZE,0u);
+      sws.kmerposrev3.init(MAXSIZE,0u);
+    }
+//    cout << "# 2nd counting -- setkmerpos" << endl;
+    setkmerpos(sws.kmerpos3,s2,sws.offset3,s_start2,s_end2);
+//    cout << "# 2nd counting -- setkmerposrev" << endl;
+    setkmerpos(sws.kmerposrev3,srev2,sws.offset3);
+   /*
+    // add last added seqs (worst kmercounts) to improve confidence estimation by keeping lower scoring seqs for full alignment
+    // TODO: might not need full alignment but just estimated alignment score from shared kmers
+    eintarray chosenflag;
+    chosenflag.init(seqids.size(),0);
+  
+    for (int l=0; l<best.size(); ++l) chosenflag[best[l]]=1;
+    for (int l=0,c=seqids.size()-1; c>=0 && l<10; --c){
+      if (chosenflag[c]==1 || sws.idcount[c]==0) continue; // no shared kmer or already in list
+      chosenflag[c]=1;
+      best.add(c);
+      ++l;
+    }
+  */
+  
+  //  eintarray seqboth;
+  //  seqboth.init(db.seqs.size(),-1);
+//    cout << "# aligning" << endl;
+  
+    for (int l=0; l<best.size(); ++l){
+      int sbest=seqids[best[l]]%db.seqs.size();
+      eseq &sdb(db.seqs.values(sbest));
+      if (sws.offset2+(unsigned int)(db.seqs.values(sbest).seqlen)<sws.offset2){  // need an unsigned int here otherwise the comparison is made in long and the offset is not correctly reset, signed int overflows are undefined so this cannot be done with signed ints either
+        sws.offset2=1u;
+        sws.kmerpos2.init(MAXSIZE,0);
+      }
+      setkmerpos(sws.kmerpos2,db.seqs.values(sbest),sws.offset2);
+  
+      ealigndata adata,adata1,adata2;
+      adata.seqid=sbest;
+      adata.revcompl=(seqids[best[l]]>=db.seqs.size());
+      adata.kmercount=sws.idcount[best[l]];
+    
+      if (seqids[best[l]]<db.seqs.size()){
+        seqident_local_leftext(id,db.seqs.keys(sbest),s,sws.kmerpos,sdb,adata1,sws,as,s_start,s_end);
+        seqident_local_rightext(id,db.seqs.keys(sbest),s2,sws.kmerpos3,sdb,adata2,sws,as,s_start2,s_end2);
+
+//        seqident_local(id,db.seqs.keys(sbest),s,sws.kmerpos,sdb,adata1,sws,as,s_start,s_end);
+//        seqident_local(id,db.seqs.keys(sbest),s2,sws.kmerpos3,sdb,adata2,sws,as,s_start2,s_end2);
+      }else{
+        seqident_local_rightext(id,db.seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata1,sws,as);
+        seqident_local_leftext(id,db.seqs.keys(sbest),srev2,sws.kmerposrev3,sdb,adata2,sws,as);
+//        seqident_local(id,db.seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata1,sws,as);
+//        seqident_local(id,db.seqs.keys(sbest),srev2,sws.kmerposrev3,sdb,adata2,sws,as);
+
+        // flip 
+        int tmp;
+        tmp=srev.seqlen-adata1.s1+s_start; adata1.s1=srev.seqlen-adata1.e1+s_start; adata1.e1=tmp; 
+        tmp=srev2.seqlen-adata2.s1+s_start2; adata2.s1=srev2.seqlen-adata2.e1+s_start2; adata2.e1=tmp; 
+        adata.revcompl=true;
+      }
+      adata.s1=adata1.s1<adata2.s1?adata1.s1:adata2.s1;
+      adata.s2=adata1.s2<adata2.s2?adata1.s2:adata2.s2;
+      adata.e1=adata1.e1>adata2.e1?adata1.e1:adata2.e1;
+      adata.e2=adata1.e2>adata2.e2?adata1.e2:adata2.e2;
+      adata.matches=adata1.matches+adata2.matches;
+      adata.mismatches=adata1.mismatches+adata2.mismatches;
+      adata.gaps=adata1.gaps+adata2.gaps;
+      adata._score=adata1._score+adata2._score;
+
+  //    LDEBUG(D_SEQALIGNMENT,print_tncount(&tncounts[l*NCOUNT_MAXLEN],0,s.seqlen));
+      if (adata.matches+adata.mismatches>0 && adata.score()>=minscore){
+        adata._eval=sdb.seqlen*exp(-lambda*adata.score()); // for K-A stats we need (*s.seqlen) but this is constant
+        pinfo.matchcounts.add(adata);
+      }
+  
+      sws.offset2+=db.seqs.values(sbest).seqlen;
+    }
+    sws.offset+=s_len;
+    sws.offset3+=s_len2;
+ 
+    if (pinfo.matchcounts.size()>0){
+      heapsort(pinfo.matchcounts);
+    //  for (int i=0; i<pinfo.matchcounts.size(); ++i)
+    //    cout << "#best: " << i << " " << seqs.keys(pinfo.matchcounts[i].seqid) << " " << pinfo.matchcounts[i].score() << endl;
+      pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
+      pinfo.seqid=pinfo.tophit.seqid;
+      pinfoarr.add(pinfo);
+    }
+  ta=ta*0.99+t1.lap()*0.01;
+}
+
+
 
 void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws)
 {
@@ -3413,14 +3966,57 @@ void findtaxcutoff(efloatarray& taxcutoff,epredinfo& pinfo2,earrayof<double,int>
 //        }
 }
 
-void taxscore(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts)
+void calcConfidence(earrayof<double,int>& ptax,efloatarray &mcfarr,const ealigndata& adata,const epredinfo& pinfo,const etax& tax)
 {
-  edoublearray taxscores;
-  taxscores.init(tax.names.size(),0.0);
+  float bid=pinfo.tophit.identity();
+  if (tax.seqs[pinfo.tophit.seqid]!=0x00){
+    eseqtax &tmptaxhit(*tax.seqs[adata.seqid]);
+    // adjust id to closest gold hit
+    if (tmptaxhit.bid>0.0) {
+      bid=bid*tmptaxhit.bid;
+      for (int l=0; l<ptax.size(); ++l)
+        ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
+    }
+  }
+
+  mcfarr.init(ptax.size());
+  float lastmcf=0.0;
+  //  adjust computed confidences
+  for (int l=MIN(ptax.size(),tax.names.size())-1; l>=0; --l){
+    ldieif(ptax.keys(l)!=-1 && ptax.keys(l)>=tax.names[l].size(),"key out of tax: "+estr(l)+" "+ptax.keys(l)+" "+tax.names[l].size());
+    mcfarr[l]=ptax.values(l);
+
+    if (tax.cutoff.size()>0){ // if only fixed id threshold exists
+      float ncf=(bid-tax.cutoff[l]+0.02)/tax.cutoffcoef[l];
+      mcfarr[l]=ncf<ptax.values(l)?ncf:ptax.values(l);
+    }
+
+    if (mcfarr[l]>1.0) mcfarr[l]=1.0; else if (mcfarr[l]<0.0) mcfarr[l]=0.0;
+    if (mcfarr[l]<lastmcf) mcfarr[l]=lastmcf;  // do not let confidences get smaller
+    lastmcf=mcfarr[l];
+  }
+}
+
+void taxScore(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,epredinfo& pinfo,edoublearray& taxscores,etax& tax)
+{
+  ptax.clear();
   for (int i=0; i<tax.names.size(); ++i)
     ptax.add(-1,0.0);
 
+  eseqtax &seqtax(*tax.seqs[adata.seqid]);
+  for (int l=0; l<seqtax.tl.size(); ++l){
+    ldieif(seqtax.tl[l].tid>=tax.names[l].size(),estr("key out of tax: ")+adata.seqid+" "+estr(l)+" "+seqtax.tl[l].tid+" "+tax.names[l].size());
+    ptax.keys(l)=seqtax.tl[l].tid;
+    ptax.values(l)=exp((1.0l-pinfo.tophit.score()/adata.score())*sweight)/taxscores[l];
+  }
+  calcConfidence(ptax,mcfarr,adata,pinfo,tax);
+}
+
+void taxScoreSum(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts)
+{
+  taxscores.init(tax.names.size(),0.0);
   int tophitl=-1;
+
   for (int l=pinfo.matchcounts.size()-1; l>=0; --l){
     int sbest=pinfo.matchcounts[l].seqid;
     if (tax.seqs[sbest]!=0x00) { tophitl=l; break; }
@@ -3430,7 +4026,6 @@ void taxscore(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray<
   ealigndata &tophit(pinfo.matchcounts[tophitl]);
   pinfo.tophit=tophit; 
   ldieif(tax.seqs[tophit.seqid]==0x00,"top hit does not have taxonomy: "+estr(tophit.seqid));
-  eseqtax &toptax(*tax.seqs[tophit.seqid]);
 
   double topscore=tophit.score();
 
@@ -3458,14 +4053,6 @@ void taxscore(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray<
   }
 
   
-  for (int l=0; l<toptax.tl.size(); ++l){
-    ldieif(toptax.tl[l].tid>=tax.names[l].size(),estr("key out of tax: ")+tophit.seqid+" "+estr(l)+" "+toptax.tl[l].tid+" "+tax.names[l].size());
-    ptax.keys(l)=toptax.tl[l].tid;
-    ptax.values(l)=1.0l/taxscores[l];
-//    cout << "# i: " << tophit.identity() << " exp: " << exp(log(tophit.identity()*100.0l)*30.0l) << " sum: " << taxscores[l] << " = " << pinfo.predtax2.values(l) << endl;
-//    pinfo.predtax2.add(toptax[l],exp(log(tophit.score())*30.0l)/taxscores[l]);
-//    cout << "\t" << tax[l].values(toptax[l]) << "\t" << exp(log(tophit.score())*30.0l)/taxscores[l] << "\t" << (noveltaxa?estr(taxcutoff[l]/hitlen):estr("-"));
-  }
 }
 
 void taxscore2(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts)
@@ -3521,6 +4108,52 @@ void taxscore2(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray
   }
 }
 
+void load_taxformat1(efile& f,eseqdb& db,etax& tax)
+{
+  estr line;
+  estrarray parts,parts2;
+  while (!f.eof()){
+    if (line.len()==0) continue;
+    if (line[0]=='#'){
+      f.readln(line);
+      parts=line.explode(" ");
+      if (parts[0]=="#cutoff:"){
+        ldieif(tax.cutoff.size()>0,"duplicate #cutoff lines!!");
+        for (int i=1; i<parts.size(); ++i){
+          parts2=parts[i].explode(":");
+          ldieif(parts2.size()<2,"not enough parts on #cutoff line, i.e.: 0.97:0.02");
+          tax.cutoff.add(parts2[0].f());
+          tax.cutoffcoef.add(parts2[1].f());
+        }
+      }else if (parts[0]=="#name:" && parts.size()>1){
+        tax.name=parts[1];
+      }else if (parts[0]=="#levels:" && parts.size()>1){
+        for (int i=1; i<parts.size(); ++i)
+          tax.levels.add(parts[i]);
+      }
+      continue; 
+    }
+    parts=line.explode("\t");
+    ldieif(parts.size()<2,"loading taxonomy, not enough fields in line: "+line);
+
+/*  simple taxonomy */
+    eseqtax *newtax=new eseqtax();
+    newtax->tl.reserve(parts.size()-1);
+    for (int i=1; i<parts.size(); ++i)
+      newtax->tl.add(eseqtaxlevel(parts[i].i()));
+
+/* mseq data with predicted confidences        
+    eseqtax *newtax=new eseqtax(parts[1].f());
+    newtax->tl.reserve((parts.size()-2)/2);
+    for (int i=2; i<parts.size(); i+=2)
+      newtax->tl.add(eseqtaxlevel(parts[i].i(),parts[i+1].f()));
+*/
+    int si=parts[0].i();
+    ldieif(si>=db.seqs.size(),"sequence number in taxonomy file does not exist in database, please make sure to recreate the taxonomy file everytime the fasta database changes");
+    tax.seqs[si]=newtax;
+  }
+}
+
 void load_taxa(const estr& taxfile,eseqdb& db)
 {
   efile f;
@@ -3535,6 +4168,10 @@ void load_taxa(const estr& taxfile,eseqdb& db)
     f.readln(line);
     if (line.len()==0) continue;
     if (line[0]=='#'){
+      if (line=="#taxformat1"){
+        load_taxformat1(f,db,tax);
+        break;
+      }
       parts=line.explode(" ");
       if (parts[0]=="#cutoff:"){
         ldieif(tax.cutoff.size()>0,"duplicate #cutoff lines!!");
@@ -3561,7 +4198,7 @@ void load_taxa(const estr& taxfile,eseqdb& db)
         newtax->tl.reserve(parts2.size());
         for (int i=0; i<parts2.size(); ++i){
           if (i>=tax.ind.size() || i>=tax.names.size()){
-            tax.names.add(estrarray());
+            tax.names.add(earray<estr>());
             tax.ind.add(estrhashof<int>());
           }
           if (!tax.ind[i].exists(parts2[i])){
@@ -3587,7 +4224,7 @@ void load_taxa(const estr& taxfile,eseqdb& db)
         for (int i=0; i<taxfields; ++i){
           int field=i*3+taxind;
           if (i>=tax.ind.size() || i>=tax.names.size()){
-            tax.names.add(estrarray());
+            tax.names.add(earray<estr>());
             tax.ind.add(estrhashof<int>());
           }
           if (!tax.ind[i].exists(parts[field])){
@@ -3618,7 +4255,6 @@ struct emtdata {
   econdsig sbufferSignal;
   eseqdb *seqdb;
 //  ebasicarray<etax> *taxa;
-  bool noveltaxa;
   bool finished;
   bool print_align;
   bool print_hits;
@@ -3641,7 +4277,7 @@ estr tax2str(emtdata& mtdata,long seqid)
       tmpstr+="-";
     else
       for (int l=0; l<tax.seqs[seqid]->tl.size(); ++l)
-        tmpstr+=estr(";")+(tax.seqs[seqid]->tl[l].tid==-1?estr("NA"):tax.names[l].values(tax.seqs[seqid]->tl[l].tid));
+        tmpstr+=estr(";")+(tax.seqs[seqid]->tl[l].tid==-1?estr("NA"):tax.names[l].at(tax.seqs[seqid]->tl[l].tid));
     tmpstr+="\t";
   }
   tmpstr.del(0,1);
@@ -3659,7 +4295,7 @@ estr outfmt_simple(const etax& tax,const earrayof<double,int>& ptax,const efloat
   estr res;
   for (int l=0; l<ptax.size() && l<tax.names.size(); ++l){
     if (mcfarr[l]<0.5) break;
-    res+=(ptax.keys(l)==-1?estr("NA"):tax.names[l].values(ptax.keys(l)))+";";
+    res+=(ptax.keys(l)==-1?estr("NA"):tax.names[l].at(ptax.keys(l)))+";";
   }
   res.del(-1);
   return(res);
@@ -3669,14 +4305,414 @@ estr outfmt_confidences(const etax& tax,const earrayof<double,int>& ptax,const e
 {
   estr res;
   for (int l=0; l<ptax.size() && l<tax.names.size(); ++l)
-    res+=(ptax.keys(l)==-1?estr("NA"):tax.names[l].values(ptax.keys(l)))+"\t"+mcfarr[l]+"\t"+ptax.values(l)+"\t";
+    res+=(ptax.keys(l)==-1?estr("NA"):tax.names[l].at(ptax.keys(l)))+"\t"+mcfarr[l]+"\t"+ptax.values(l)+"\t";
   res.del(-1);
   return(res);
 }
 
+void taskClusterCompress()
+{
+  estr outstr;
+  eseqcluster scluster;
+  estrarrayof<eseq> tmpdbseqs;
+  eintarray tmpkmers;
+  int iotucount;
+  tmpkmers.init(MAXSIZE,-1);
+  scluster.otukmers.init(MAXSIZE);
+
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(mtdata.seqdb->otus.size()*2)/64+1];
+  searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerpos2.init(MAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
+  while(1){
+    mtdata.m.lock();
+    while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.seqs.size()==0 && mtdata.finished) {mtdata.m.unlock(); return;}
+
+    estrarrayof<eseq> *pbuf=mtdata.seqs[0];
+    mtdata.seqs.erase(0);
+    mtdata.m.unlock();
+    outstr.clear();
+    tmpdbseqs.clear();
+    estr cstr;
+
+    for (int i=0; i<pbuf->size(); ++i){
+      eseq& s(pbuf->values(i));
+      earray<epredinfo> pinfoarr;
+
+      seqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      if (pinfoarr.size()>0 && pinfoarr[0].tophit.score()>=s.seqlen*0.8){
+        outstr+=">"+pbuf->keys(i)+"\n";
+        epredinfo& pinfo(pinfoarr[0]);
+        pinfo.tophit.profile.inv();
+        
+        cstr=estr(pinfo.tophit.seqid)+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t"+pinfo.tophit.compress(s);
+        for (int j=0; j<s.npos.size(); ++j)
+          cstr+="\t"+estr(s.npos[j]);
+        if (cstr.len()<s.seqlen*0.7)
+          outstr+=cstr;
+        else
+          outstr+=s.print_seq();
+        outstr+="\n";
+
+        int hitotu=mtdata.seqdb->seqotu[pinfo.tophit.seqid];
+        mtdata.seqdb->seqotu.add(hitotu);
+        mtdata.seqdb->otus[hitotu].add(mtdata.seqdb->seqs.size());
+        mtdata.seqdb->seqs.add(pbuf->keys(i),pbuf->values(i));
+        continue;
+      }
+
+      mtdata.seqdb->seqotu.add(mtdata.seqdb->otus.size());
+      mtdata.seqdb->otus.add(eintarray(mtdata.seqdb->seqs.size()));
+      otukmeradd(mtdata.seqdb->otukmers,mtdata.seqdb->otus.size()-1,s,tmpkmers,mtdata.seqdb->otus.size(),akmers,0xFul);
+      mtdata.seqdb->seqs.add(pbuf->keys(i),pbuf->values(i));
+
+      outstr+=">"+pbuf->keys(i)+"\n";
+
+      if (pinfoarr.size()>0){
+        epredinfo& pinfo(pinfoarr[0]);
+        pinfo.tophit.profile.inv();
+        cstr=estr(pinfo.tophit.seqid)+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t"+pinfo.tophit.compress(s);
+        for (int j=0; j<s.npos.size(); ++j)
+          cstr+="\t"+estr(s.npos[j]);
+        if (cstr.len()<s.seqlen*0.7)
+          outstr+=cstr;
+        else
+          outstr+=s.print_seq();
+        outstr+="\n";
+      }else
+        outstr+=s.print_seq()+"\n";
+    }
+
+    mtdata.m.lock();
+    cout << outstr;
+    mtdata.sbuffer.add(pbuf);
+    mtdata.sbufferSignal.signal();
+    mtdata.m.unlock();
+  }
+  delete searchws.bitmask;
+}
 
 
-void taskSeqsearch()
+void taskCluster()
+{
+  estr outstr;
+  eseqcluster scluster;
+  estrarrayof<eseq> tmpdbseqs;
+  eintarray tmpkmers;
+  int iotucount;
+  tmpkmers.init(MAXSIZE,-1);
+  scluster.otukmers.init(MAXSIZE);
+
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(mtdata.seqdb->otus.size()*2)/64+1];
+  searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerpos2.init(MAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
+  while(1){
+    mtdata.m.lock();
+    while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.seqs.size()==0 && mtdata.finished) {mtdata.m.unlock(); return;}
+
+/*
+    iotucount=mtdata.seqdb->otus.size();
+    if (mtdata.seqdb->otus.size()>scluster.otus.size()){
+      scluster.seqotu=mtdata.seqdb->seqotu;
+      scluster.otukmers=mtdata.seqdb->otukmers;
+      scluster.otus=mtdata.seqdb->otus;
+    }
+*/
+    estrarrayof<eseq> *pbuf=mtdata.seqs[0];
+    mtdata.seqs.erase(0);
+    mtdata.m.unlock();
+    outstr.clear();
+    tmpdbseqs.clear();
+
+    for (int i=0; i<pbuf->size(); ++i){
+      eseq& s(pbuf->values(i));
+      earray<epredinfo> pinfoarr;
+
+      seqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      if (pinfoarr.size()>0 && pinfoarr[0].tophit.identity()>=0.98) {
+        epredinfo& pinfo(pinfoarr[0]);
+        cout << pbuf->keys(i) << "\t" << mtdata.seqdb->seqs.keys(pinfo.tophit.seqid) << "\t" << pinfo.tophit.score() << "\t" << pinfo.tophit.identity() << "\t" << pinfo.tophit.matches << "\t" << pinfo.tophit.mismatches << "\t" << pinfo.tophit.gaps << "\t" << (s.seqstart+pinfo.tophit.s1) << "\t" << (s.seqstart+pinfo.tophit.e1) << "\t" << pinfo.tophit.s2 << "\t" << pinfo.tophit.e2 << "\t" << (pinfo.tophit.revcompl?"-":"+") << endl;
+        continue;
+      }
+      
+
+      mtdata.seqdb->seqotu.add(mtdata.seqdb->otus.size());
+      mtdata.seqdb->otus.add(eintarray(mtdata.seqdb->otus.size()));
+      otukmeradd(mtdata.seqdb->otukmers,mtdata.seqdb->otus.size()-1,s,tmpkmers,mtdata.seqdb->otus.size(),akmers,0xFul);
+      mtdata.seqdb->seqs.add(pbuf->keys(i),pbuf->values(i));
+
+/*
+      scluster.seqotu.add(scluster.otus.size());
+      scluster.otus.add(eintarray(scluster.seqotu.size()-1));
+      otukmeradd(scluster.otukmers,scluster.otus.size()-1,s,tmpkmers,scluster.otus.size(),akmers,0xFul);
+      tmpdbseqs.add(pbuf->keys(i),pbuf->values(i));
+*/
+      cout << pbuf->keys(i) << "\t-\t" << pinfoarr.size() << "\t" << (pinfoarr.size()>0?mtdata.seqdb->seqs.keys(pinfoarr[0].tophit.seqid):estr()) << "\t" << endl;
+ 
+/* 
+      outstr+=">"+pbuf->keys(i)+"\n";
+      epredinfo& pinfo(pinfoarr[0]);
+      pinfo.tophit.profile.inv();
+      outstr+=estr(pinfo.tophit.seqid)+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t"+pinfo.tophit.compress(s);
+      for (int j=0; j<s.npos.size(); ++j)
+        outstr+="\t"+estr(s.npos[j]);
+      outstr+="\n";
+*/
+    }
+
+    mtdata.m.lock();
+/*
+    if (iotucount<scluster.otus.size()){
+      if (mtdata.seqdb->otus.size()>iotucount){
+        ldie("mapseq not ready for multithreaded clustering");
+
+        for (int i=iotucount; i<scluster.otus.size(); ++i){
+          for (int j=iotucount; j<mtdata.seqdb->otus.size(); ++j){
+            // align tmpdbseqs[i] and db.seqs[db.otus[j][0]] and check if reference should be discarded or added
+//            if (seqid<0.98){
+              //add to reference
+//              break;
+//            }
+          }
+        }
+      }else{
+        for (int i=0; i<tmpdbseqs.size(); ++i)
+          mtdata.seqdb->seqs.add(tmpdbseqs.keys(i),tmpdbseqs.values(i));
+        mtdata.seqdb->seqotu=scluster.seqotu;
+        mtdata.seqdb->otukmers=scluster.otukmers;
+        mtdata.seqdb->otus=scluster.otus;
+      }
+    }
+*/
+    cout << "# seqdb: " << mtdata.seqdb->seqs.size() << " otus: " << mtdata.seqdb->otus.size() << endl;
+    cout << outstr;
+    mtdata.sbuffer.add(pbuf);
+    mtdata.sbufferSignal.signal();
+    mtdata.m.unlock();
+  }
+  delete searchws.bitmask;
+}
+
+
+
+void taskCompress()
+{
+  estr outstr;
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(mtdata.seqdb->otus.size()*2)/64+1];
+  searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerpos2.init(MAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
+  while(1){
+    mtdata.m.lock();
+    while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.seqs.size()==0 && mtdata.finished) {mtdata.m.unlock(); return;}
+
+    estrarrayof<eseq> *pbuf=mtdata.seqs[0];
+    mtdata.seqs.erase(0);
+    mtdata.m.unlock();
+    outstr.clear();
+
+    for (int i=0; i<pbuf->size(); ++i){
+      eseq& s(pbuf->values(i));
+      earray<epredinfo> pinfoarr;
+
+      seqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      if (pinfoarr.size()==0){
+        outstr+=">"+pbuf->keys(i)+"\n";
+        outstr+=pbuf->values(i).print_seq()+"\n";
+        continue;
+      }
+  
+      outstr+=">"+pbuf->keys(i)+"\n";
+      epredinfo& pinfo(pinfoarr[0]);
+      pinfo.tophit.profile.inv();
+      outstr+=estr(pinfo.tophit.seqid)+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t"+pinfo.tophit.compress(s);
+      for (int j=0; j<s.npos.size(); ++j)
+        outstr+="\t"+estr(s.npos[j]);
+      outstr+="\n";
+    }
+
+    mtdata.m.lock();
+    cout << outstr;
+    mtdata.sbuffer.add(pbuf);
+    mtdata.sbufferSignal.signal();
+    mtdata.m.unlock();
+  }
+  delete searchws.bitmask;
+}
+
+void taskSearchPaired()
+{
+  estr outstr;
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(mtdata.seqdb->otus.size()*2)/64+1];
+  searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.kmerpos2.init(MAXSIZE,0u);
+
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.kmerpos3.init(MAXSIZE,0u);
+  searchws.kmerposrev3.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.offset3=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
+  while(1){
+    mtdata.m.lock();
+    while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.seqs.size()==0 && mtdata.finished) {mtdata.m.unlock(); return;}
+
+    estrarrayof<eseq> *pbuf=mtdata.seqs[0];
+    mtdata.seqs.erase(0);
+    mtdata.m.unlock();
+    outstr.clear();
+
+    for (int i=0; i+1<pbuf->size(); i+=2){
+      eseq& s(pbuf->values(i));
+      eseq& s2(pbuf->values(i+1));
+
+      earray<epredinfo> pinfoarr;
+  //    ebasicarray<ealigndata> matchcounts;
+      seqsearchpair(pbuf->keys(i),*mtdata.seqdb,s,s2,pinfoarr,searchws);
+      if (pinfoarr.size()==0) continue;
+//      if (pinfo.tophit.seqid<0) continue;
+  
+      for (int pi=0; pi<pinfoarr.size(); ++pi){
+        epredinfo& pinfo(pinfoarr[pi]);
+        float taxcutoffmin=pinfo.matchcounts[0].identity();
+        float bid=pinfo.tophit.identity();
+        if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+          eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
+          // adjust id to closest gold hit
+  //        if (tmptaxhit.bid>0.0) bid=tmptaxhit.bid*bid;
+          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+        }
+      
+//        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
+  
+//        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
+        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+       
+        if (mtdata.seqdb->taxa.size()==0){
+          double topscore=pinfo.tophit.score();
+          double tscore=0.0;
+          for (int t=0; t<pinfo.matchcounts.size(); ++t)
+            tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
+           outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+        }
+
+        for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+          etax& tax(mtdata.seqdb->taxa.at(t));
+      
+          earrayof<double,int> ptax;
+          edoublearray taxscores;
+          efloatarray mcfarr;
+          taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts);
+          taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax);
+      
+          outstr+="\t";
+          outstr+=outfmt.value()(tax,ptax,mcfarr);
+          outstr+="\t";
+        }
+        outstr+="\n";
+        if (mtdata.print_hits){
+          outstr+="#\t";
+          etax& tax(mtdata.seqdb->taxa.at(0));
+          for (int l=pinfo.matchcounts.size()-1; l>0; --l){
+            ealigndata& adata(pinfo.matchcounts[l]);
+  //          outstr+="# "+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+adata.s2+"\t"+adata.e2+"\t"+tax2str(mtdata,adata.seqid)+"\n";
+            outstr+=mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.kmercount+"\t";
+          }
+          outstr+="\n";
+        }
+  //      outstr+=pinfo.tophit.profile.str() + "\n";
+        if (mtdata.print_align){
+          pinfo.tophit.profile.inv();
+          outstr+=pinfo.tophit.profile.str() + "\n";
+          estr salistr=pinfo.tophit.compress(s);
+          outstr+=salistr+ "\n";
+          outstr+=sali_decompress(salistr,mtdata.seqdb->seqs.values(pinfo.tophit.seqid))+"\n";
+          outstr+=pinfo.tophit.align_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
+          outstr+="\n";
+        }
+        mtdata.m.lock();
+        cout << outstr; outstr.clear();
+        mtdata.m.unlock();
+
+//      if (pinfo.tophit.pair)
+//        outstr+=estr("#pair: ")+pinfo.tophit.pair->score()+"\t"+pinfo.tophit.pair->identity()+"\t"+pinfo.tophit.pair->matches+"\t"+pinfo.tophit.pair->mismatches+"\t"+pinfo.tophit.pair->gaps+"\t"+pinfo.tophit.pair->s2+"\t"+pinfo.tophit.pair->e2+"\n";
+//      outstr+="# "+pinfo.tophit.profile.str()+"\n";
+
+/*
+      for (int j=pinfo.matchcounts.size()-1; j>=0 && j>=pinfo.matchcounts.size()-10; --j){
+        ealigndata &ad(pinfo.matchcounts[j]);
+        outstr+="# "+mtdata.seqdb->seqs.keys(ad.seqid)+" "+ad.identity()+" "+ad.score()+" ";
+        ldieif(mtdata.seqdb->taxa.size()==0,"no taxa");
+        ldieif(ad.seqid>mtdata.seqdb->taxa[0].seqs.size(),"seqid larger than taxa: "+estr(ad.seqid)+" > "+mtdata.seqdb->taxa[0].seqs.size());
+        if (mtdata.seqdb->taxa[0].seqs[ad.seqid]==0x00) outstr+="-";
+        else{ 
+          eseqtax& st(*mtdata.seqdb->taxa[0].seqs[ad.seqid]);
+          for (int k=0; k<st.tl.size(); ++k)
+            outstr+=";"+mtdata.seqdb->taxa[0].names[k][st.tl[k].tid];
+        }
+        outstr+="\n";
+      }
+*/
+      }
+    }
+
+    mtdata.m.lock();
+    cout << outstr;
+    mtdata.sbuffer.add(pbuf);
+    mtdata.sbufferSignal.signal();
+    mtdata.m.unlock();
+  }
+  delete searchws.bitmask;
+}
+
+void taskSearch()
 {
   estr outstr;
   esearchws searchws;
@@ -3726,7 +4762,7 @@ void taskSeqsearch()
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
   
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
-        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+        outstr+=pbuf->keys(i)+(mtdata.print_hits?"\t0":"")+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
        
         if (mtdata.seqdb->taxa.size()==0){
           double topscore=pinfo.tophit.score();
@@ -3736,86 +4772,48 @@ void taskSeqsearch()
            outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
         }
 
+        earray<edoublearray> taxscores;
+        taxscores.init(mtdata.seqdb->taxa.size());
         for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
           etax& tax(mtdata.seqdb->taxa.at(t));
       
-          earrayof<double,int> ptax;
-          taxscore(ptax,pinfo,tax,searchws.taxcounts);
-      
-          bid=pinfo.tophit.identity();
-          if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]!=0x00){
-            eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]);
-            // adjust id to closest gold hit
-  //          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
-  //          if (tmptaxhit.bid>0.0) bid=0.5*(bid<tmptaxhit.bid?bid:tmptaxhit.bid)+0.5*bid*tmptaxhit.bid; 
-            if (tmptaxhit.bid>0.0) {
-              bid=bid*tmptaxhit.bid;
-              for (int l=0; l<ptax.size(); ++l)
-                ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
-  //            if (ptax.values(l)>tmptaxhit.tl[l].cf) ptax.values(l)=tmptaxhit.tl[l].cf;
-  //          ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
-            }
-          }
-  
-  /*
-          efloatarray taxcutoff;
-          if (mtdata.noveltaxa){
-            taxcutoff.init(tax.names.size(),0.0);
-            if (pinfo2.matchcounts.size()>0)
-              findtaxcutoff(taxcutoff,pinfo2,ptax,tax);
-          }
-  */
-      
-  //        int hitlen=pinfo.tophit.e2-pinfo.tophit.s2;
-     
           efloatarray mcfarr;
-          mcfarr.init(ptax.size());
-          float lastmcf=0.0;
-          //  adjust computed confidences
-          for (int l=MIN(ptax.size(),tax.names.size())-1; l>=0; --l){
-            ldieif(ptax.keys(l)!=-1 && ptax.keys(l)>=tax.names[l].size(),"key out of tax: "+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+" "+estr(l)+" "+ptax.keys(l)+" "+tax.names[l].size());
-            mcfarr[l]=ptax.values(l);
-  
-            // if both fixed thresholds and precalculated identity thresholds exist, mix both in 3:1 ratio
-            if (tax.cutoff.size()>0){ // if only fixed id threshold exists
-              float ncf=(bid-tax.cutoff[l]+0.02)/tax.cutoffcoef[l];
-              mcfarr[l]=ncf<ptax.values(l)?ncf:ptax.values(l);
-            }
-  //            mcf=ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
-  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.05;
-  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.1;
-  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
-  
-            if (mcfarr[l]>1.0) mcfarr[l]=1.0; else if (mcfarr[l]<0.0) mcfarr[l]=0.0;
-            if (mcfarr[l]<lastmcf) mcfarr[l]=lastmcf;  // do not let confidences get smaller
-            lastmcf=mcfarr[l];
-          }
+          earrayof<double,int> ptax;
+          taxScoreSum(taxscores[t],pinfo,tax,searchws.taxcounts);
+          taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax);
 
-/*      
-          for (int l=0; l<ptax.size() && l<tax.names.size(); ++l){
-  //          outstr+=estr("\t")+(ptax.keys(l)==-1?estr("NA"):tax.names[l].values(ptax.keys(l)))+"\t"+ptax.values(l)+"\t"+(taxcutoff.size()?taxcutoff[l]:estr("-"));
-            outstr+=estr("\t")+(ptax.keys(l)==-1?estr("NA"):tax.names[l].values(ptax.keys(l)))+"\t"+mcfarr[l]+"\t"+ptax.values(l);
-          }
-*/
           outstr+="\t";
           outstr+=outfmt.value()(tax,ptax,mcfarr);
           outstr+="\t";
         }
         outstr+="\n";
         if (mtdata.print_hits){
-          outstr+="#\t";
           etax& tax(mtdata.seqdb->taxa.at(0));
-          for (int l=pinfo.matchcounts.size()-1; l>0; --l){
+          for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
             ealigndata& adata(pinfo.matchcounts[l]);
   //          outstr+="# "+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+adata.s2+"\t"+adata.e2+"\t"+tax2str(mtdata,adata.seqid)+"\n";
-            outstr+=mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.kmercount+"\t";
+//            outstr+=estr(l)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.kmercount+"\n";
+            outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
+            for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+              etax& tax(mtdata.seqdb->taxa.at(t));
+          
+              efloatarray mcfarr;
+              earrayof<double,int> ptax;
+              taxScore(ptax,mcfarr,adata,pinfo,taxscores[t],tax);
+              outstr+="\t";
+              outstr+=outfmt.value()(tax,ptax,mcfarr);
+              outstr+="\t";
+            }
+            outstr+="\n";
           }
-          outstr+="\n";
         }
   //      outstr+=pinfo.tophit.profile.str() + "\n";
         if (mtdata.print_align){
           pinfo.tophit.profile.inv();
           outstr+=pinfo.tophit.profile.str() + "\n";
+          estr salistr=pinfo.tophit.compress(s);
+          outstr+=salistr+ "\n";
+          outstr+=sali_decompress(salistr,mtdata.seqdb->seqs.values(pinfo.tophit.seqid))+"\n";
           outstr+=pinfo.tophit.align_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
           outstr+="\n";
         }
@@ -3883,74 +4881,353 @@ void help()
   exit(0);
 }
 
-int emain()
+void loadCluster(eseqdb& db,const estr& cfile)
 {
-  getParser().onHelp=help;
-  cout << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
-  initdlt();
-  bool print_hits=false;
-  bool print_align=false;
-  bool nocluster=false;
-  estr cutoffs;
-  epregister(sweight);
-  epregister(nocluster);
-  epregister(otulim);
-  epregister(lambda);
-  epregister(print_hits);
-  epregister(print_align);
-  epregister(minscore);
-  epregister(minid1);
-  epregister(minid2);
-  epregister(cf);
-  epregister2(as.match,"match");
-  epregister2(as.mismatch,"mismatch");
-  epregister2(as.gapext,"gapext");
-  epregister2(as.gapopen,"gapopen");
-  epregister2(as.dropoff,"dropoff");
-  epregister(cutoffs);
-  estr dbfilter;
-  epregister(dbfilter);
-  outfmt.choice=0;
-  outfmt.add("confidences",outfmt_confidences);
-  outfmt.add("simple",outfmt_simple);
+  efile f;
+  f.open(cfile,"r");
+  estr line;
+  eintarray tmpkmers;
+  int i;
 
-  epregisterClassInheritance(eoption<outfmt_fd>,ebaseoption);
-//  epregisterClassMethod4(eoption<outfmt_fd>,operator=,int,(const estr& val),"=");
+  tmpkmers.init(MAXSIZE,0);
+  while (!f.eof() && f.readln(line)){
+    if (line.len()==0) continue;
+    estrarray parts(line.explode(" "));
 
-  epregister(outfmt);
+    int tmpi,repid=-1;
+    for (i=1; i<parts.size(); ++i){
+      tmpi=parts[i].i();
+// //        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax!=0x00) {repid=tmpi; break;}
+//        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
+      repid=tmpi;
+      break;
+    }
+    if (repid==-1) continue; // no sequence found with taxonomic annotation
 
-  epregisterFunc(help);
-  
-//  epregister(galign);
-  bool benchmark=false;
-//  epregister(benchmark);
+    db.otus.add(eintarray());
+    eintarray &tmpo(db.otus[db.otus.size()-1]);
+    tmpo.reserve(parts.size()-1);
+    tmpi=parts[1].i();
+//      otukmeradd(otukmers,otus.size()-1,seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFFFFul);
+//      if (db.otus.size()==0)
+//        otukmeradd(db.otukmers,db.otus.size()-1,db.seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFul);
+//      else{
+//      memset(bitmask,0x0u,(db.seqs.size()/64+1)*sizeof(uint64_t));
+    uint32_t ibest=0u;
+    short bcount=0;
+    int kmerlen=0;
+    eseq &s(db.seqs.values(tmpi));
+//      kmercount_single_nopos(db.otukmers,s,bitmask,idcount,tmpkmers,db.otus.size(),kmerlen,ibest,bcount,akmers,0xFul);
+//      if (idcount.size()==0){
+    otukmeradd(db.otukmers,db.otus.size()-1,s,tmpkmers,db.otus.size(),akmers,0xFul);
+//        tmpkmers.init(MAXSIZE,0);
+//        kmerhash(db.otukmers,db.kmerlast,s,tmpkmers,ti++,db.seqs.size(),akmers,0xFul);
+//      }else
+//        otuaddkmerdiff(db.otukmers,db.seqs.values(db.otus[ibest][0]),s,tmpkmers,i,db.otus.size()-1,akmers,0xFul);
+//      idcount.add(0);
 
-  bool noveltaxa=false;
-//  epregister(noveltaxa);
+      
 
-  int nthreads=4;
-  epregister(nthreads);
-
-  epregister(tophits);
-  epregister(topotus);
-  int step=0;
-
-//  epregister(step);
-
-  estr ignfile;
-//  epregister(ignfile);
-
-//  epregister(kmer);
-  eparseArgs();
-  mtdata.print_align=print_align;
-  mtdata.print_hits=print_hits;
-
-  if(getParser().args.size()<2){
-    cout << "syntax: mapseq <query> [db] [tax] [tax2] ..." << endl;
-    return(0);
+    for (i=1; i<parts.size(); ++i){
+      tmpi=parts[i].i();
+//   //        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax==0x00) continue; // do not add sequence if there is no taxonomic annotation
+//        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
+      ldieif(tmpi>=db.seqs.size(),"cluster file has more sequence ids than original file, please remove cluster file: "+cfile);
+      tmpo.add(tmpi);
+      db.seqotu[tmpi]=db.otus.size()-1;
+    }
   }
-  estr cfile;
+}
 
+
+void makeCluster(eseqdb& db,const estr& cfile)
+{
+    // phase 1: find all cluster seeds, but do not add non-seeds in first phase
+//    eintarray dbotus;
+  eintarray tmpkmers;
+  euintarray idcount;
+  eintarray kmerpos;
+  int i;
+
+  eintarray len_si(iheapsort(db.seqs));
+  db.otus.reserve(db.seqs.size()); // worst case scenario
+  db.otus.add(eintarray(len_si[0]));
+  db.seqotu[len_si[0]]=0;
+//    dbotus.add(len_si[0]);
+
+//    fprintf(stderr,"# adding kmers from %i\n",db.otus[0][0]);
+
+  tmpkmers.init(MAXSIZE,-1);
+  otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
+  idcount.reserve(db.seqs.size());
+  kmerpos.reserve(db.seqs.size());
+  idcount.init(db.otus.size(),0u);
+  kmerpos.init(db.otus.size(),0u);
+//    uint32_t sp=0u;
+//    uint32_t kp=8u;
+  
+  for (i=1; i<db.seqs.size(); ++i){
+    eseq& s(db.seqs.values(len_si[i]));
+    if (i%100==0) 
+      fprintf(stderr,"\rseq: %i otus: %li",i,db.otus.size());
+//      if (sp+1<sp){
+      idcount.init(db.otus.size(),0);
+//        sp=0;
+//      }
+//      if (kp+s.seqlen<kp){
+      kmerpos.init(db.otus.size(),0u);
+//        kp=8u;
+//      }
+
+//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
+//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
+    kmercount_single(db.otukmers,s,idcount,kmerpos);
+//      kp+=s.seqlen;
+
+    int ibest=0;
+    for (int l=1; l<idcount.size(); ++l){
+      if (idcount[l]>idcount[ibest]) ibest=l;
+    }
+/*
+      uint32_t bestcount=0;
+      int l;
+      for (l=0; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp) {
+          ibest=l;
+          bestcount=tc;
+          break;
+        }
+      }
+        
+      for (; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
+//        if (idcount[l]>idcount[ibest]) ibest=l;
+      }
+*/
+    if (float(idcount[ibest])/s.seqlen >= 0.80) {
+//        cout << "# " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
+        // then merge sequence to otu
+//        otus[ibest].add(len_si[i]);
+//        seqotu[len_si[i]]=ibest;
+    } else {
+//        cout << "+ " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
+        // create new otu
+//        idcount.add(0);
+//        kmerpos.add(0);
+      db.otus.add(eintarray(len_si[i]));
+//        otukmercount.add(kmercount);
+      ibest=db.otus.size()-1;
+      db.seqotu[len_si[i]]=ibest;
+      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
+    }
+//      ++sp;
+  }
+  fprintf(stderr,"\rseq: %i clusters: %li\n",i,db.otus.size());
+
+  fprintf(stderr,"phase 2:\n");
+  // phase 2: after finding all seeds, add all non-seeds to the most similar clusters
+  for (i=0; i<db.seqotu.size(); ++i){
+    eseq& s(db.seqs.values(i));
+    if (i%100==0)
+      fprintf(stderr,"\rseq: %i",i);
+    if (db.seqotu[i]!=-1) continue;
+
+//      if (sp+1<sp){
+      idcount.init(db.otus.size(),0);
+//        sp=0;
+//      }
+//      if (kp+s.seqlen<kp){
+      kmerpos.init(db.otus.size(),0u);
+//        kp=8u;
+//      }
+
+//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
+//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
+    kmercount_single(db.otukmers,s,idcount,kmerpos);
+//      kp+=s.seqlen;
+
+    int ibest=0;
+/*
+      uint32_t bestcount=0;
+      int l;
+      for (l=0; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp) {
+          ibest=l;
+          bestcount=tc;
+          break;
+        }
+      }
+        
+      for (; l<idcount.size(); ++l){
+        uint32_t ti=idcount[l]>>10u;
+        uint32_t tc=idcount[l]&BMASK10;
+        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
+//        if (idcount[l]>idcount[ibest]) ibest=l;
+      }
+*/
+    for (int l=1; l<idcount.size(); ++l){
+      if (idcount[l]>idcount[ibest]) ibest=l;
+    }
+    db.otus[ibest].add(i);
+    db.seqotu[i]=ibest;
+//      ++sp;
+  }
+//    return(0);
+//    db.otus.init(dbotus.size());
+//    for (int i=0; i<db.seqotu.size(); ++i)
+//      db.otus[db.seqotu[i]].add(i);
+
+
+//  if (dbfilter.len()==0){ // do not save cluster file for a filtered db
+    fprintf(stderr,"\rseq: %li clusters: %li\n",db.seqs.size(),(long)db.otus.size());
+    if (cfile.len()){
+      efile f(cfile,"w");
+      for (int i=0; i<db.otus.size(); ++i){
+        f.write(estr(i));
+        for (int j=0; j<db.otus[i].size(); ++j)
+          f.write(" "+estr(db.otus[i][j]));
+        f.write("\n");
+      }
+      f.close();
+    }
+//  }
+}
+
+void loadSequencesBinary(eseqdb& db,const estr& filename)
+{
+  efile f;
+  estr tmpstr;
+  f.open(filename,"r");
+  long si=0,tsi;
+  unsigned int ver;
+  const int bufsize=10000;
+  f.read(tmpstr,bufsize);
+  si=unserialuint(ver,tmpstr,si);
+  ldieif(si==-1,"loading binary database");
+  ldieif(ver!=0,"unknown database version: "+estr(ver));
+  eseq s;
+  estr sid;
+  while (!f.eof() || si < tmpstr.len()){
+    tsi=sid.unserial(tmpstr,si);
+    ldieif(tsi==-1 && f.eof(),"Unexpected end of file");
+    if (tsi==-1){
+      tmpstr=tmpstr.substr(si);
+      f.read(tmpstr,bufsize);
+      si=0;
+      tsi=sid.unserial(tmpstr,si);
+      ldieif(tsi==-1,"Buffer not long enough: "+estr(db.seqs.size())+" "+estr(tmpstr.len()));
+    }
+    si=tsi;
+
+    tsi=s.unserial(tmpstr,si);
+    ldieif(tsi==-1 && f.eof(),"Unexpected end of file");
+    if (tsi==-1){
+      tmpstr=tmpstr.substr(si);
+      f.read(tmpstr,bufsize);
+      si=0;
+      tsi=s.unserial(tmpstr,si);
+      ldieif(tsi==-1,"Buffer not long enough: "+estr(db.seqs.size())+" "+estr(tmpstr.len()));
+    }
+    si=tsi;
+    db.seqs.add(sid,s);
+  }
+}
+
+
+void saveSequences(eseqdb& db,const estr& filename)
+{
+  efile f;
+  estr tmpstr;
+  f.open(filename,"w");
+  serialuint(0,tmpstr);
+  f.write(tmpstr);
+  tmpstr.clear();
+  for (int i=0; i<db.seqs.size(); ++i){
+    db.seqs.keys(i).serial(tmpstr);
+    db.seqs.values(i).serial(tmpstr);
+    f.write(tmpstr);
+    tmpstr.clear();
+  }
+  f.close();
+}
+
+
+void loadSequences(eseqdb& db,int argi=2)
+{
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
+  if (getParser().args.size()>argi)
+    dbfile=getParser().args[argi];
+  else if (!efile(dbfile).exists())
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
+  if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
+
+  estr str2id,str2seq,line;
+  efile f;
+  f.open(dbfile,"r");
+  f.readln(line);
+  while (!f.eof()){
+    str2id=line;
+    ldieif(str2id.len()==0 || str2id[0]!='>',"Unexpected line: "+str2id);
+
+    str2seq.clear();
+    while (f.readln(line) && line.len() && line[0]!='>') str2seq+=line;
+    str2id.del(0,1);
+
+    int i=str2id.findchr(" \t");
+    if (i!=-1l) str2id.del(i); // only keep id up to first white space
+//    if (dbfilter.len() && str2id!=dbfilter) continue;
+
+    db.seqind.add(str2id,db.seqs.size());
+    db.seqs.add(str2id,eseq(str2seq));
+  }
+  f.close();
+
+  db.seqotu.init(db.seqs.size(),-1);
+  db.otukmers.init(MAXSIZE);
+  estr cfile=dbfile+".mscluster";
+  if (nocluster){
+    eintarray tmpkmers;
+    db.otus.reserve(db.seqs.size());
+    db.otus.add(eintarray(0));
+    tmpkmers.init(MAXSIZE,-1);
+    otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
+    for (int i=1; i<db.seqs.size(); ++i){
+      eseq& s(db.seqs.values(i));
+      db.otus.add(eintarray(i));
+      int ibest=db.otus.size()-1;
+      db.seqotu[i]=ibest;
+      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
+    }
+//  } else if (dbfilter.len()==0 && efile(cfile).exists()){ // load clustering
+  } else if (efile(cfile).exists()){ // load clustering
+    loadCluster(db,cfile);
+    ldieif(db.otus.size()==0,"no clusters in database");
+  }else{ // perform clustering
+    fprintf(stderr,"# no clustering file found, performing clustering\n");
+    makeCluster(db,cfile);
+  }
+
+  int fcount=0;
+  int okmercount=0;
+  for (int i=0; i<db.otukmers.size(); ++i){
+    if (db.otukmers[i].size()>0)
+      ++okmercount;
+    if (db.otukmers[i].size()>1000 && db.otukmers[i].size()>db.otus.size()*0.50){
+      db.otukmers[i].clear();
+      ++fcount;
+    }
+  }
+//  cerr << "# fcount: " << fcount << " otukmercount: " << okmercount << endl;
+}
+
+void doInit()
+{
   for (unsigned int i=0; i<MAXSIZE; ++i)
     akmers[i]=0x00u;
   akmers[0x08ul]=1u; // AG
@@ -3968,7 +5245,6 @@ int emain()
   }
 
 //  cout << "4mer shift" << endl;
-
   for (unsigned int i=0u; i<(1u<<8u); ++i){
     if (akmers[i]==1u) continue;
     for (unsigned int j=0u; j<(1u<<8u); ++j){
@@ -3977,427 +5253,31 @@ int emain()
 //      cout << kmer2str((i<<8u)|j) << endl;
     }
   }
+}
 
-
-  
-  efile f;
-  estr line;
-  estrarray args;
-
-  eseqdb db;
-
-//  estrarrayof<eseq> seqs;
-//  ebasicarray<etax> taxa;
-//  ebasicarray<eintarray> taxcounts;
-
-
-  estrhash ignseqs;
-  if (ignfile.len()>0){
-    f.open(ignfile,"r");
-    while (!f.eof()){
-      f.readln(line);
-      ignseqs.add(line,estr());
-    }
-  }
-
-//  estrarrayof<eseq> query;
-/*
-  while(f.readln(line)){
-    if (line.len()==0 || line[0]=='#') continue;
-    args=line.explode(" ");
-    ldieif(args.size()<2,"id and sequence not found in line: "+line);
-    seqs.add(args[0],args[1]);
-  }
-
-  f.open(argv[2],"r");
-  while(f.readln(line)){
-    if (line.len()==0 || line[0]=='#') continue;
-    args=line.explode(" ");
-    ldieif(args.size()<2,"id and sequence not found in line: "+line);
-    query.add(args[0],args[1]);
-  }
-*/
-
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
-  if (getParser().args.size()>2)
-    dbfile=getParser().args[2];
-  else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
-  if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
-
-//  estrhashof<int> seqind;
-  estr str2id,str2seq;
-  int maxseqlen=0;
-  f.open(dbfile,"r");
-  f.readln(line);
-  while (!f.eof()){
- //f.readln(str2id)){
-    str2id=line;
-    ldieif(str2id.len()==0 || str2id[0]!='>',"Unexpected line: "+str2id);
-
-    str2seq.clear();
-    while (f.readln(line) && line.len() && line[0]!='>') str2seq+=line;
-    str2id.del(0,1);
-
-    int i=str2id.findchr(" \t");
-    if (i!=-1l) str2id.del(i); // only keep id up to first white space
-    if (dbfilter.len() && str2id!=dbfilter) continue;
-
-    db.seqind.add(str2id,db.seqs.size());
-    db.seqs.add(str2id,eseq(str2seq));
-
-    if (str2seq.len()>maxseqlen) maxseqlen=str2seq.len();
-//    cout << ">" << str2id << endl;
-//    cout << str2seq << endl;
-//    cout << seqs.values(seqs.size()-1) << endl;
-  }
-  f.close();
-
-  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
-  ldieif(db.seqs.size()==0,"empty database");
-
+void processQueryPairend(eseqdb& db,const estr& fname,const estr& fname2,void (*taskfunc)())
+{
   etimer t1;
   t1.reset();
 
-//  earray<eintarray> otus;
-//  ebasicarray<eintarray*> otukmers;
-
-  db.otukmers.init(MAXSIZE);
-
-  eintarray tmpkmers;
-//  eintarray kmercounts;
-  int i;
-
-  if (getParser().args.size()>3) {
-    for (int i=3; i<getParser().args.size(); ++i){
-      cerr << "# loading taxonomy file: " << getParser().args[i] << endl;
-      load_taxa(getParser().args[i],db);
-    }
-  }else if (getParser().args.size()<=2){ // do not automatically load taxonomy if database is specified
-    if (efile(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax").exists()){
-      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax",db);
-      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.otutax",db);
-//      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
-    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax").exists()){
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax",db);
-      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.otutax",db);
-//      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
-    }
-  }
-  if (cutoffs.size()>0 && db.taxa.size()>0){
-    ldieif(db.taxa.size()>1,"more than one taxonomy provided, cant use -cutoffs to specify cutoffs");
-    etax& tax(db.taxa[0]);
-    estrarray parts2;
-    estrarray parts=cutoffs.explode(" ");
-    ldieif(parts.size()<tax.cutoff.size(),"not enough cutoff levels: "+estr(tax.cutoff.size()));
-    tax.cutoff.clear(); tax.cutoffcoef.clear();
-    for (int i=0; i<parts.size(); ++i){
-      parts2=parts[i].explode(":");
-      ldieif(parts2.size()<2,"not enough parts on cutoff argument, i.e.: 0.97:0.02");
-      tax.cutoff.add(parts2[0].f());
-      tax.cutoffcoef.add(parts2[1].f());
-    }
-  }
-
-
-  
-  cerr << "# taxonomies: " << db.taxa.size() << endl;
-  for (int i=0; i<db.taxa.size(); ++i){
-    cerr << "# tax levels: " << db.taxa[i].names.size() << endl;
-//    taxcounts.init(taxa[i].names.size());
-    for (int j=0; j<db.taxa[i].names.size(); ++j){
-      cerr << "# tax: " << i << " level: " << j << " ("<< db.taxa[i].names[j].size() << ")" << endl;
-//      taxcounts[i][j].init(taxa[i].names[j].size(),-1);
-    }
-  }
-
-
-
-  eintarray kmerpos;
-  ebasicarray<uint32_t> idcount;
-
-//  eintarray seqotu;
-  db.seqotu.init(db.seqs.size(),-1);
-
-  tmpkmers.init(MAXSIZE,-1);
-
-
-
-  const int MAXSEQS=1000000;
-  uint64_t bitmask[MAXSEQS/64+1];
-
-
-  cfile=dbfile+".mscluster";
-  if (nocluster){
-    db.otus.reserve(db.seqs.size());
-    db.otus.add(eintarray(0));
-
-    tmpkmers.init(MAXSIZE,-1);
-    otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
-    for (i=1; i<db.seqs.size(); ++i){
-      eseq& s(db.seqs.values(i));
-      db.otus.add(eintarray(i));
-      int ibest=db.otus.size()-1;
-      db.seqotu[i]=ibest;
-      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
-    }
-  } else if (dbfilter.len()==0 && efile(cfile).exists()){ // load clustering
-    efile f;
-    f.open(cfile,"r");
-    estr line;
-    tmpkmers.init(MAXSIZE,0);
-    while (!f.eof() && f.readln(line)){
-      if (line.len()==0) continue;
-      estrarray parts(line.explode(" "));
-
-      int tmpi,repid=-1;
-      for (i=1; i<parts.size(); ++i){
-        tmpi=parts[i].i();
-//        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax!=0x00) {repid=tmpi; break;}
-        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
-        repid=tmpi;
-        break;
-      }
-      if (repid==-1) continue; // no sequence found with taxonomic annotation
-
-      db.otus.add(eintarray());
-      eintarray &tmpo(db.otus[db.otus.size()-1]);
-      tmpo.reserve(parts.size()-1);
-      tmpi=parts[1].i();
-//      otukmeradd(otukmers,otus.size()-1,seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFFFFul);
-//      if (db.otus.size()==0)
-//        otukmeradd(db.otukmers,db.otus.size()-1,db.seqs.values(tmpi),tmpkmers,tmpi,akmers,0xFul);
-//      else{
-//      memset(bitmask,0x0u,(db.seqs.size()/64+1)*sizeof(uint64_t));
-      uint32_t ibest=0u;
-      short bcount=0;
-      int kmerlen=0;
-      eseq &s(db.seqs.values(tmpi));
-//      kmercount_single_nopos(db.otukmers,s,bitmask,idcount,tmpkmers,db.otus.size(),kmerlen,ibest,bcount,akmers,0xFul);
-//      if (idcount.size()==0){
-      otukmeradd(db.otukmers,db.otus.size()-1,s,tmpkmers,db.otus.size(),akmers,0xFul);
-//        tmpkmers.init(MAXSIZE,0);
-//        kmerhash(db.otukmers,db.kmerlast,s,tmpkmers,ti++,db.seqs.size(),akmers,0xFul);
-//      }else
-//        otuaddkmerdiff(db.otukmers,db.seqs.values(db.otus[ibest][0]),s,tmpkmers,i,db.otus.size()-1,akmers,0xFul);
-//      idcount.add(0);
-
-      
-
-      for (i=1; i<parts.size(); ++i){
-        tmpi=parts[i].i();
-//        if (ignseqs.size() && !ignseqs.exists(seqs.keys(tmpi)) || seqs.values(tmpi).tax==0x00) continue; // do not add sequence if there is no taxonomic annotation
-        if (ignseqs.size() && ignseqs.exists(db.seqs.keys(tmpi))) continue;
-        ldieif(tmpi>=db.seqs.size(),"cluster file has more sequence ids than original file, please remove cluster file: "+cfile);
-        tmpo.add(tmpi);
-        db.seqotu[tmpi]=db.otus.size()-1;
-      }
-    }
-    ldieif(db.otus.size()==0,"no clusters in database");
-  }else{ // perform clustering
-
-    fprintf(stderr,"# no clustering file found, performing clustering\n");
-
-    // phase 1: find all cluster seeds, but do not add non-seeds in first phase
-//    eintarray dbotus;
-    eintarray len_si(iheapsort(db.seqs));
-    db.otus.reserve(db.seqs.size()); // worst case scenario
-    db.otus.add(eintarray(len_si[0]));
-    db.seqotu[len_si[0]]=0;
-//    dbotus.add(len_si[0]);
-
-//    fprintf(stderr,"# adding kmers from %i\n",db.otus[0][0]);
-
-    tmpkmers.init(MAXSIZE,-1);
-    otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
-    idcount.reserve(db.seqs.size());
-    kmerpos.reserve(db.seqs.size());
-    idcount.init(db.otus.size(),0u);
-    kmerpos.init(db.otus.size(),0u);
-//    uint32_t sp=0u;
-//    uint32_t kp=8u;
-  
-    for (i=1; i<db.seqs.size(); ++i){
-      eseq& s(db.seqs.values(len_si[i]));
-      if (i%100==0) 
-        fprintf(stderr,"\rseq: %i otus: %li",i,db.otus.size());
-//      if (sp+1<sp){
-        idcount.init(db.otus.size(),0);
-//        sp=0;
-//      }
-//      if (kp+s.seqlen<kp){
-        kmerpos.init(db.otus.size(),0u);
-//        kp=8u;
-//      }
-
-//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
-//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
-      kmercount_single(db.otukmers,s,idcount,kmerpos);
-//      kp+=s.seqlen;
-
-      int ibest=0;
-      for (int l=1; l<idcount.size(); ++l){
-        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-/*
-      uint32_t bestcount=0;
-      int l;
-      for (l=0; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp) {
-          ibest=l;
-          bestcount=tc;
-          break;
-        }
-      }
-        
-      for (; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
-//        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-*/
-      if (float(idcount[ibest])/s.seqlen >= 0.80) {
-//        cout << "# " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
-        // then merge sequence to otu
-//        otus[ibest].add(len_si[i]);
-//        seqotu[len_si[i]]=ibest;
-      } else {
-//        cout << "+ " << float(idcount[ibest])/seqs.values(len_si[i]).seqlen << endl;
-        // create new otu
-//        idcount.add(0);
-//        kmerpos.add(0);
-        db.otus.add(eintarray(len_si[i]));
-//        otukmercount.add(kmercount);
-        ibest=db.otus.size()-1;
-        db.seqotu[len_si[i]]=ibest;
-        otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
-      }
-//      ++sp;
-    }
-    fprintf(stderr,"\rseq: %i clusters: %li\n",i,db.otus.size());
-
-    fprintf(stderr,"phase 2:\n");
-    // phase 2: after finding all seeds, add all non-seeds to the most similar clusters
-    for (i=0; i<db.seqotu.size(); ++i){
-      eseq& s(db.seqs.values(i));
-      if (i%100==0)
-        fprintf(stderr,"\rseq: %i",i);
-      if (db.seqotu[i]!=-1) continue;
-
-//      if (sp+1<sp){
-        idcount.init(db.otus.size(),0);
-//        sp=0;
-//      }
-//      if (kp+s.seqlen<kp){
-        kmerpos.init(db.otus.size(),0u);
-//        kp=8u;
-//      }
-
-//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
-//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
-      kmercount_single(db.otukmers,s,idcount,kmerpos);
-//      kp+=s.seqlen;
-
-      int ibest=0;
-/*
-      uint32_t bestcount=0;
-      int l;
-      for (l=0; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp) {
-          ibest=l;
-          bestcount=tc;
-          break;
-        }
-      }
-        
-      for (; l<idcount.size(); ++l){
-        uint32_t ti=idcount[l]>>10u;
-        uint32_t tc=idcount[l]&BMASK10;
-        if (ti==sp && tc>bestcount) { ibest=l; bestcount=tc; }
-//        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-*/
-      for (int l=1; l<idcount.size(); ++l){
-        if (idcount[l]>idcount[ibest]) ibest=l;
-      }
-      db.otus[ibest].add(i);
-      db.seqotu[i]=ibest;
-//      ++sp;
-    }
-//    return(0);
-//    db.otus.init(dbotus.size());
-//    for (int i=0; i<db.seqotu.size(); ++i)
-//      db.otus[db.seqotu[i]].add(i);
-
-    if (dbfilter.len()==0){ // do not save cluster file for a filtered db
-      fprintf(stderr,"\rseq: %li clusters: %li\n",db.seqs.size(),(long)db.otus.size());
-      if (cfile.len()){
-        efile f(cfile,"w");
-        for (int i=0; i<db.otus.size(); ++i){
-          f.write(estr(i));
-          for (int j=0; j<db.otus[i].size(); ++j)
-            f.write(" "+estr(db.otus[i][j]));
-          f.write("\n");
-        }
-        f.close();
-      }
-    }
-  }
-
-
-  int fcount=0;
-  int okmercount=0;
-  for (i=0; i<db.otukmers.size(); ++i){
-    if (db.otukmers[i].size()>0)
-      ++okmercount;
-    if (db.otukmers[i].size()>1000 && db.otukmers[i].size()>db.otus.size()*0.50){
-      db.otukmers[i].clear();
-      ++fcount;
-    }
-  }
-  cerr << "# fcount: " << fcount << " otukmercount: " << okmercount << endl;
-
-
-//  earray<estrarray> tax;
-//  earray<estrhashof<int> > taxind;
-
-/*
-  int alen;
-  int match[11];
-  int j,k;
-*/
+  egzfile f,f2;
+  estr line,line2;
+  estrarray args;
 
   t1.reset();
-
-/*
-  eintarray seqkmers;
-  eintarray revseqkmers,revtmpkmers;
-  eintarray tmpkmers2;
-*/
-
   ethreads t;
   emutex m;
+  
+  ldieif(fname=="-","reading from stdin not supported with paired end data");
  
-  if (estr(getParser().args[1])=="-")
-    f.open(stdin);
-  else
-    f.open(getParser().args[1],"r");
+  f.open(fname,"r");
+  f2.open(fname2,"r");
 
   mtdata.seqdb=&db;
-  mtdata.noveltaxa=noveltaxa;
   mtdata.finished=false;
 
-
   t1.reset();
-//  taskSeqsearchRead(f);
-//  cerr << "# done processing " << " seqs (" << t1.lap()*0.001 << "s)" << endl;
-  
-  t.run(taskSeqsearch,evararray(),nthreads);
+  t.run(taskfunc,evararray(),nthreads);
 
   mtdata.sbuffer.reserve(nthreads*2);
   for (int i=0; i<nthreads*2; ++i){
@@ -4406,27 +5286,130 @@ int emain()
     mtdata.sbuffer.add(sarr);
   }
 
-  cout << "#query\tdbhit\tbitscore\tidentity\tmatches\tmismatches\tgaps\tquery_start\tquery_end\tdbhit_start\tdbhit_end\tstrand\t";
-  if (outfmt.key()=="simple"){
-    for (int i=0; i<db.taxa.size(); ++i)
-      cout << "\t" << db.taxa[i].name << "\t";
-  }else if (outfmt.key()=="confidences"){
-    for (int i=0; i<db.taxa.size(); ++i){
-      etax& tax(db.taxa[i]);
-      if (tax.levels.size()==0){
-        if (tax.names.size())
-          cout << "\t"<<tax.name<<":taxlevel0\tcombined_cf\tscore_cf";
-        for (int j=1; j<tax.names.size(); ++j)
-          cout << "\ttaxlevel" << j << "\tcombined_cf\tscore_cf";
-      }else{
-        cout << "\t"<< tax.name <<":" << tax.levels[0] << "\tcombined_cf\tscore_cf";
-        for (int j=1; j<tax.levels.size(); ++j)
-          cout << "\t" << tax.levels[j] << "\tcombined_cf\tscore_cf";
-      }
-      cout << "\t";
+//  cerr << "# processing input... ";
+  long seqcount=0;
+  fprintf(stderr,"# processing input... ");
+  fflush(stderr);
+  lerrorif(!f.readln(line),"unable to read query file");
+  lerrorif(!f2.readln(line2),"unable to read query file2");
+  estrarrayof<eseq> *cbuf=0x00;
+
+  int cbufind=0;
+  const int MAXSEQLEN=100000;
+  long seqstart,seqstart2;
+  estr seq,id;
+  estr seq2,id2;
+  seq.reserve(MAXSEQLEN);
+  seq2.reserve(MAXSEQLEN);
+  while (!f.eof() && !f2.eof()){
+    if (cbuf==0x00){
+      mtdata.m.lock();
+      while (mtdata.sbuffer.size()==0) mtdata.sbufferSignal.wait(mtdata.m);
+      cbuf=mtdata.sbuffer[mtdata.sbuffer.size()-1];
+      mtdata.sbuffer.erase(mtdata.sbuffer.size()-1);
+      mtdata.m.unlock();
+      cbufind=0;
     }
+
+    seqstart=0;
+    seqstart2=0;
+    id=line; id2=line2;
+
+    ldieif(id.len()==0 || id[0]!='>',"Unexpected line: "+id);
+    ldieif(id2.len()==0 || id2[0]!='>',"Unexpected line: "+id2);
+
+    id.del(0,1);
+    id2.del(0,1);
+
+    int i=id.findchr(" \t"),i2=id2.findchr(" \t");
+    if (i!=-1l) id.del(i); // only keep id up to first white space
+    if (i2!=-1l) id2.del(i2); // only keep id up to first white space
+
+    ldieif(i!=i2,"paired end read ids do not match or reads are not in sync: "+id+" != "+id2);
+
+    seq.clear();
+    seq2.clear();
+    //TODO: read a limited number of nucleotides each time, so the code does not depend on line breaks. For every nucleotide "chunk", compress the nucleotides and add to sequence
+    while (f.readln(line) && line.len() && line[0]!='>'){
+      ldieif(seq.len()+line.len()>MAXSEQLEN,"paired end reads larger than "+estr(MAXSEQLEN)+" not supported");
+      seq+=line;
+    }
+    while (f2.readln(line2) && line2.len() && line2[0]!='>'){
+      ldieif(seq2.len()+line2.len()>MAXSEQLEN,"paired end reads larger than "+estr(MAXSEQLEN)+" not supported");
+      seq2+=line2;
+    }
+
+    cbuf->keys(cbufind)=id;
+    eseq& s(cbuf->values(cbufind));
+    s.setseq(seq);
+    s.seqstart=seqstart;
+    ++cbufind;
+
+    cbuf->keys(cbufind)=id2;
+    eseq& s2(cbuf->values(cbufind));
+    s2.setseq(seq2);
+    s2.seqstart=seqstart2;
+    ++cbufind;
+
+    if (cbufind==cbuf->size()){
+      mtdata.m.lock();
+      mtdata.seqs.add(cbuf);
+      mtdata.seqsSignal.signal();
+      mtdata.m.unlock();
+      cbuf=0x00;
+    }
+
+    ++seqcount;
+    if (seqcount%100==0 && isatty(2))
+      fprintf(stderr,"\r# processing input... paired end reads: %li",seqcount);
+//      fprintf(stderr,"\r# processing input... %li  ti: %f ts: %f ti2: %f ts2: %f ta: %f tdp1: %f tdp2: %f tdpfl: %f tdpmd: %f",seqcount,ti,ts,ti2,ts2,ta,tdp1,tdp2,tdpfl,tdpmd);
+ }
+  mtdata.m.lock();
+  if (cbuf!=0x00){
+    for (int i=cbuf->size()-1; i>=cbufind; --i) cbuf->erase(i);
+    mtdata.seqs.add(cbuf);
+    cbuf=0x00;
   }
-  cout << endl;
+  mtdata.finished=true;
+  mtdata.seqsSignal.broadcast();
+  mtdata.m.unlock();
+  
+  fprintf(stderr,"\r# processing input... %li\n",seqcount);
+  f.close();
+  t.wait();
+  cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
+}
+
+void processQuery(eseqdb& db,const estr& fname,void (*taskfunc)())
+{
+  etimer t1;
+  t1.reset();
+
+  egzfile f;
+  estr line;
+  estrarray args;
+
+  t1.reset();
+  ethreads t;
+  emutex m;
+ 
+  if (fname=="-")
+    f.open(stdin,"r");
+  else
+    f.open(fname,"r");
+
+  mtdata.seqdb=&db;
+  mtdata.finished=false;
+
+  t1.reset();
+  t.run(taskfunc,evararray(),nthreads);
+
+  mtdata.sbuffer.reserve(nthreads*2);
+  for (int i=0; i<nthreads*2; ++i){
+    estrarrayof<eseq> *sarr=new estrarrayof<eseq>;
+    for (int j=0; j<100; ++j) sarr->add(estr(),eseq());
+    mtdata.sbuffer.add(sarr);
+  }
 
 
 //  cerr << "# processing input... ";
@@ -4438,6 +5421,7 @@ int emain()
   int cbufind=0;
   const int MAXSEQLEN=100000;
   long seqstart;
+  estr str2seq,str2id;
   str2seq.reserve(MAXSEQLEN);
   while (!f.eof()){
     if (cbuf==0x00){
@@ -4512,6 +5496,537 @@ int emain()
   f.close();
   t.wait();
   cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
+}
+
+void saveTaxonomy(eseqdb& db,etax& tax,const estr& fname)
+{
+  efile f;
+  f.open(fname,"w");
+  estr tmpstr;
+  tax.name.serial(tmpstr);
+  serialint(tax.levels.size(),tmpstr);
+  for (int j=0; j<tax.levels.size(); ++j)
+    tax.levels[j].serial(tmpstr);
+  serialint(tax.names.size(),tmpstr);
+  for (int i=0; i<tax.names.size(); ++i){
+    serialint(tax.names[i].size(),tmpstr);
+    for (int j=0; j<tax.names[i].size(); ++j)
+      tax.names[i][j].serial(tmpstr);
+  }
+  f.write(tmpstr);
+  tmpstr.clear();
+  for (int i=0; i<tax.names.size(); ++i){
+    serialint(tax.names[i].size(),tmpstr);
+    for (int j=0; j<tax.names[i].size(); ++j)
+      tax.names[i][j].serial(tmpstr);
+  }
+  f.write(tmpstr);
+  tmpstr.clear();
+  for (int i=0; i<db.seqs.size(); ++i){
+    
+  }
+  f.close();
+}
+
+void loadTaxonomyBinary(eseqdb& db,const estr& fname)
+{
+  efile f;
+  f.open(fname,"r");
+  estr tmpstr;
+  long si=0,tsi;
+  f.read(tmpstr,100000000);
+
+  etax tax;
+  tsi=tax.name.unserial(tmpstr,si);
+  ldieif(tsi==-1,"error unserializing names");
+  si=tsi;
+  int len,len2;
+  si=unserialint(len,tmpstr,si);
+  ldieif(si==-1,"error unserializing size");
+  tax.levels.init(len);
+  for (int i=0; i<len; ++i){
+    si=tax.levels[i].unserial(tmpstr,si);
+    ldieif(si==-1,"error unserializing float");
+  }
+  si=unserialint(len,tmpstr,si);
+  ldieif(si==-1,"error unserializing size");
+  tax.names.init(len);
+  for (int i=0; i<len; ++i){
+    si=unserialint(len2,tmpstr,si);
+    ldieif(si==-1,"error unserializing size");
+    tax.names[i].init(len2);
+    for (int j=0; j<len2; ++j){
+      si=tax.names[i][j].unserial(tmpstr,si);
+      ldieif(si==-1,"error unserializing name items");
+    }
+  }
+  db.taxa.add(tax);
+  f.close();
+}
+
+void loadTaxonomy(eseqdb& db,int argi=3)
+{
+  if (getParser().args.size()>argi) {
+    for (int i=argi; i<getParser().args.size(); ++i){
+      cerr << "# loading taxonomy file: " << getParser().args[i] << endl;
+      load_taxa(getParser().args[i],db);
+    }
+  }else if (getParser().args.size()<argi){ // do not automatically load taxonomy if database is specified
+    if (efile(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax").exists()){
+      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax",db);
+      load_taxa(estr(DATAPATH)+"/mapref-2.2.fna.otutax",db);
+//      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
+    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax").exists()){
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax",db);
+      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.otutax",db);
+//      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
+    }
+  }
+  if (cutoffs.size()>0 && db.taxa.size()>0){
+    ldieif(db.taxa.size()>1,"more than one taxonomy provided, cant use -cutoffs to specify cutoffs");
+    etax& tax(db.taxa[0]);
+    estrarray parts2;
+    estrarray parts=cutoffs.explode(" ");
+    ldieif(parts.size()<tax.cutoff.size(),"not enough cutoff levels: "+estr(tax.cutoff.size()));
+    tax.cutoff.clear(); tax.cutoffcoef.clear();
+    for (int i=0; i<parts.size(); ++i){
+      parts2=parts[i].explode(":");
+      ldieif(parts2.size()<2,"not enough parts on cutoff argument, i.e.: 0.97:0.02");
+      tax.cutoff.add(parts2[0].f());
+      tax.cutoffcoef.add(parts2[1].f());
+    }
+  }
+
+  cerr << "# taxonomies: " << db.taxa.size() << endl;
+  for (int i=0; i<db.taxa.size(); ++i){
+    cerr << "# tax levels: " << db.taxa[i].names.size() << endl;
+//    taxcounts.init(taxa[i].names.size());
+    for (int j=0; j<db.taxa[i].names.size(); ++j){
+      cerr << "# tax: " << i << " level: " << j << " ("<< db.taxa[i].names[j].size() << ")" << endl;
+//      taxcounts[i][j].init(taxa[i].names[j].size(),-1);
+    }
+  }
+}
+
+void printSearchHeader(eseqdb& db)
+{
+  cout << "#query\tdbhit\tbitscore\tidentity\tmatches\tmismatches\tgaps\tquery_start\tquery_end\tdbhit_start\tdbhit_end\tstrand\t";
+  if (outfmt.key()=="simple"){
+    for (int i=0; i<db.taxa.size(); ++i)
+      cout << "\t" << db.taxa[i].name << "\t";
+  }else if (outfmt.key()=="confidences"){
+    for (int i=0; i<db.taxa.size(); ++i){
+      etax& tax(db.taxa[i]);
+      if (tax.levels.size()==0){
+        if (tax.names.size())
+          cout << "\t"<<tax.name<<":taxlevel0\tcombined_cf\tscore_cf";
+        for (int j=1; j<tax.names.size(); ++j)
+          cout << "\ttaxlevel" << j << "\tcombined_cf\tscore_cf";
+      }else{
+        cout << "\t"<< tax.name <<":" << tax.levels[0] << "\tcombined_cf\tscore_cf";
+        for (int j=1; j<tax.levels.size(); ++j)
+          cout << "\t" << tax.levels[j] << "\tcombined_cf\tscore_cf";
+      }
+      cout << "\t";
+    }
+  }
+  cout << endl;
+}
+
+void actionCluster()
+{
+  cerr << "Clustering: loading database" << endl;
+
+  doInit();
+
+  eseqdb db;
+  db.otukmers.init(MAXSIZE);
+  mtdata.seqdb=&db;
+
+  nthreads=1;
+
+//  loadSequences(db);
+//  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+//  ldieif(db.seqs.size()==0,"empty database");
+  processQuery(db,getParser().args[1],taskCluster);
+  exit(0);
+}
+
+void actionClusterCompress()
+{
+  cerr << "Compressing: denovo reference" << endl;
+
+  doInit();
+
+  eseqdb db;
+  db.otukmers.init(MAXSIZE);
+  mtdata.seqdb=&db;
+  nthreads=1;
+
+  loadSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+//  ldieif(db.seqs.size()==0,"empty database");
+  processQuery(db,getParser().args[1],taskClusterCompress);
+  exit(0);
+}
+
+
+void actionPairend()
+{
+  doInit();
+
+  eseqdb db;
+  loadSequences(db,3);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  ldieif(getParser().args.size()<3,"not enough arguments, syntax: mapseq -paired <paired1.fna> <paired2.fna> [db] [[tax1] [tax2] ...]");
+  loadTaxonomy(db,4);
+
+  printSearchHeader(db);
+
+  processQueryPairend(db,getParser().args[1],getParser().args[2],taskSearchPaired);
+
+  exit(0);
+}
+
+estr mapseq(const estr& seq,eseqdb& db)
+{
+  eseq s(seq);
+  
+  estr outstr;
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(db.otus.size()*2)/64+1];
+  searchws.otukmerpos.init(db.otus.size()*2,0);
+  searchws.idcount.init(db.otus.size()*2,0);
+  searchws.idcount2.init(db.otus.size()*2,0);
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerpos2.init(MAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
+
+  outstr.clear();
+
+  earray<epredinfo> pinfoarr;
+  seqsearch("query",db,s,pinfoarr,searchws);
+  if (pinfoarr.size()==0) return("nohit");
+  
+  for (int pi=0; pi<pinfoarr.size(); ++pi){
+    epredinfo& pinfo(pinfoarr[pi]);
+    float taxcutoffmin=pinfo.matchcounts[0].identity();
+    float bid=pinfo.tophit.identity();
+    if (db.taxa.size() && db.taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+      eseqtax &tmptaxhit(*db.taxa.at(0).seqs[pinfo.tophit.seqid]);
+      if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+    }
+      
+    outstr+="[{\"id\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"score\":"+pinfo.tophit.score()+",\"identity\":"+pinfo.tophit.identity()+",\"matches\":"+pinfo.tophit.matches+",\"mismatches\":"+pinfo.tophit.mismatches+",\"gaps\":"+pinfo.tophit.gaps+",\"qstart\":"+(s.seqstart+pinfo.tophit.s1)+",\"qend\":"+(s.seqstart+pinfo.tophit.e1)+",\"dstart\":"+pinfo.tophit.s2+",\"dend\":"+pinfo.tophit.e2+",\"strand\":"+(pinfo.tophit.revcompl?"1":"0");
+//    outstr+="query\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+       
+    pinfo.tophit.profile.inv();
+    outstr+=",\"sumalign\":\""+pinfo.tophit.profile.str()+"\"";
+    outstr+=",\"alignment\":\""+pinfo.tophit.align_str(s,db.seqs.values(pinfo.tophit.seqid)).replace("\n","\\n")+"\"";
+
+    if (db.taxa.size()==0){
+      double topscore=pinfo.tophit.score();
+      double tscore=0.0;
+      for (int t=0; t<pinfo.matchcounts.size(); ++t)
+        tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
+      outstr+=",\"taxa\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"confidence\":"+(1.0/tscore);
+//      outstr+="\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+    }
+
+    edoublearray taxscores;
+    for (int t=0; t<db.taxa.size(); ++t){
+      etax& tax(db.taxa.at(t));
+      
+      earrayof<double,int> ptax;
+      edoublearray taxscores;
+      efloatarray mcfarr;
+      taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts);
+      taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax);
+     
+      if (ptax.size()>2){
+        outstr+=",\"taxa\":\""+tax.names[0].at(ptax.keys(0))+";"+tax.names[1].at(ptax.keys(1))+";"+tax.names[2].at(ptax.keys(2))+"\",\"confidence\":"+ptax.values(2);
+      }else{
+        outstr+=",\"error\":\"unexpected number of taxa levels\"";
+      }
+
+    }
+    outstr+="}";
+
+    for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
+      ealigndata& adata(pinfo.matchcounts[l]);
+      outstr+=",{\"id\":\""+db.seqs.keys(adata.seqid)+"\",\"score\":"+adata.score()+",\"identity\":"+adata.identity()+",\"matches\":"+adata.matches+",\"mismatches\":"+adata.mismatches+",\"gaps\":"+adata.gaps+",\"qstart\":"+(s.seqstart+adata.s1)+",\"qend\":"+(s.seqstart+adata.e1)+",\"dstart\":"+adata.s2+",\"dend\":"+adata.e2+",\"strand\":"+(adata.revcompl?"1":"0");
+      adata.profile.inv();
+      outstr+=",\"sumalign\":\""+adata.profile.str()+"\"";
+      outstr+=",\"alignment\":\""+adata.align_str(s,db.seqs.values(adata.seqid)).replace("\n","\\n")+"\"";
+
+      if (db.taxa.size() && adata.seqid<db.taxa.at(0).seqs.size() && db.taxa.at(0).seqs[adata.seqid]!=0x00){
+         etax& tax(db.taxa.at(0));
+         eseqtax& stax(*tax.seqs[adata.seqid]);
+         outstr+=",\"taxa\":\""+(stax.tl.size()>2?tax.names[0].at(stax.tl[0].tid)+";"+tax.names[1].at(stax.tl[1].tid)+";"+tax.names[2].at(stax.tl[2].tid):"")+"\",\"confidence\":"+(taxscores.size()>2?exp((1.0l-pinfo.tophit.score()/adata.score())*sweight)/taxscores[2]:0.0)+"}";
+      }
+    }
+
+    outstr+="]";
+  }
+  return(outstr);
+}
+
+void actionDaemon()
+{
+  doInit();
+
+  eseqdb db;
+  loadSequences(db,1);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  loadTaxonomy(db,2);
+  
+  epregisterFuncD(mapseq,evarRef(db));
+  eparseArgs();
+  getSystem().run();
+}
+
+void actionLoadTaxBinary()
+{
+  cerr << "Binary: loading taxonomy" << endl;
+  ldieif(getParser().args.size()<2,"syntax: <db.mstax>");
+
+  doInit();
+
+  eseqdb db;
+  loadTaxonomyBinary(db,getParser().args[1]);
+  cerr << "# taxonomies: " << db.taxa.size() << endl;
+  for (int i=0; i<db.taxa.size(); ++i){
+    cerr << "# tax levels: " << db.taxa[i].names.size() << endl;
+    for (int j=0; j<db.taxa[i].names.size(); ++j){
+      cerr << "# tax: " << i << " level: " << j << " ("<< db.taxa[i].names[j].size() << ")" << endl;
+    }
+  }
+  exit(0);
+}
+
+void actionLoadBinary()
+{
+  cerr << "Convert: loading database" << endl;
+  ldieif(getParser().args.size()<2,"syntax: <db.msfna>");
+
+  doInit();
+
+  eseqdb db;
+  loadSequencesBinary(db,getParser().args[1]);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  exit(0);
+}
+
+
+void actionConvertTax()
+{
+  cerr << "ConvertTax: loading database" << endl;
+  ldieif(getParser().args.size()<2,"syntax: <db.fna> <db.tax>");
+
+  nocluster=true;
+
+  doInit();
+
+  eseqdb db;
+  loadSequences(db,1);
+  loadTaxonomy(db,2);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  saveTaxonomy(db,db.taxa[0],getParser().args[1]+".mstax");
+  exit(0);
+}
+
+
+void actionConvert()
+{
+  cerr << "Convert: loading database" << endl;
+  ldieif(getParser().args.size()<2,"syntax: <db.fna>");
+
+  nocluster=true;
+
+  doInit();
+
+  eseqdb db;
+  loadSequences(db,1);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  saveSequences(db,getParser().args[1]+".msfna");
+  exit(0);
+}
+
+
+void actionCompress()
+{
+  cerr << "Compressing: loading database" << endl;
+
+  doInit();
+
+  eseqdb db;
+  loadSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  processQuery(db,getParser().args[1],taskCompress);
+  exit(0);
+}
+
+void actionDecompress()
+{
+  cerr << "loading database" << endl;
+
+  doInit();
+
+  eseqdb db;
+  loadSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+
+  egzfile f;
+  estr line;
+  estr seqstr;
+  eseq seq;
+  estrarray arr;
+  f.open(getParser().args[1],"r");
+  while (!f.eof()){
+    f.readln(line);
+    if (line.len()==0 || line[0]=='#') continue;
+    if (line[0]=='>') { 
+      cout << line << endl;
+      continue;
+    }
+    int i=line.find("\t");
+    if (i==-1) {
+      cout << line << endl;
+      continue;
+    }
+    arr=line.explode("\t");
+    int sid=arr[0].i();
+    ldieif(sid<0 || sid>=db.seqs.size(),"reference sequence not found, make sure to use the same database used in compression");
+    seqstr=sali_decompress(arr[2],db.seqs.values(sid));
+    for (int j=3; j<arr.size(); ++j){
+      ldieif(arr[j].i()<0 || arr[j].i()>seqstr.len(),"N pos out of bounds");
+      seqstr[arr[j].i()]='N';
+    }
+    if (arr[1]=="-"){
+      seq.setseq(seqstr);
+      seq.revcompl();
+      cout << seq.print_seq() << endl;
+    }else
+      cout << seqstr << endl;
+  }
+  exit(0);
+}
+
+
+int emain()
+{
+  getParser().onHelp=help;
+  cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
+  initdlt();
+  epregister(sweight);
+  epregister(nocluster);
+  epregister(otulim);
+  epregister(lambda);
+  epregister2(mtdata.print_hits,"print_hits");
+  epregister2(mtdata.print_align,"print_align");
+  epregister(minscore);
+  epregister(minid1);
+  epregister(minid2);
+  epregister(cf);
+  epregister2(as.match,"match");
+  epregister2(as.mismatch,"mismatch");
+  epregister2(as.gapext,"gapext");
+  epregister2(as.gapopen,"gapopen");
+  epregister2(as.dropoff,"dropoff");
+  epregister(cutoffs);
+  estr dbfilter;
+  epregister(dbfilter);
+  outfmt.choice=0;
+  outfmt.add("confidences",outfmt_confidences);
+  outfmt.add("simple",outfmt_simple);
+
+  getParser().actions.add("cluster",actionCluster);
+  getParser().actions.add("clustercompress",actionClusterCompress);
+  getParser().actions.add("compress",actionCompress);
+  getParser().actions.add("convert",actionConvert);
+  getParser().actions.add("converttax",actionConvertTax);
+  getParser().actions.add("loadbinary",actionLoadBinary);
+  getParser().actions.add("loadtaxbinary",actionLoadTaxBinary);
+  getParser().actions.add("decompress",actionDecompress);
+  getParser().actions.add("paired",actionPairend);
+//  getParser().actions.add("daemon",actionDaemon);
+  daemonArgs(actionDaemon);
+
+  epregisterClassInheritance(eoption<outfmt_fd>,ebaseoption);
+//  epregisterClassMethod4(eoption<outfmt_fd>,operator=,int,(const estr& val),"=");
+
+  epregister(outfmt);
+
+  epregisterFunc(help);
+  
+//  epregister(galign);
+  bool benchmark=false;
+//  epregister(benchmark);
+
+  epregister(nthreads);
+
+  epregister(tophits);
+  epregister(topotus);
+  int step=0;
+
+//  epregister(step);
+
+  estr ignfile;
+//  epregister(ignfile);
+
+//  epregister(kmer);
+  eparseArgs();
+
+  if(getParser().args.size()<2){
+    cout << "syntax: mapseq <query> [db] [tax] [tax2] ..." << endl;
+    return(0);
+  }
+
+  doInit();
+
+  eseqdb db;
+
+/*
+  estrhash ignseqs;
+  if (ignfile.len()>0){
+    f.open(ignfile,"r");
+    while (!f.eof()){
+      f.readln(line);
+      ignseqs.add(line,estr());
+    }
+  }
+*/
+
+  loadSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+
+  loadTaxonomy(db);
+
+//  eintarray kmerpos;
+//  ebasicarray<uint32_t> idcount;
+
+//  const int MAXSEQS=1000000;
+//  uint64_t bitmask[MAXSEQS/64+1];
+
+  printSearchHeader(db);
+
+  processQuery(db,getParser().args[1],taskSearch);
+
   exit(0);
 
   return(0);

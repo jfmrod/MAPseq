@@ -568,7 +568,7 @@ float seqcalign_global(const eseq& a,int pa,int ea,const eseq& b,int pb,int eb,e
 float seqcalign(const eseq& a,int pa,int ea,const eseq& b,int pb,int eb,estr& as1,estr& as2)
 {
   uint64_t *psa=reinterpret_cast<uint64_t*>(a.seq._str),*psb=reinterpret_cast<uint64_t*>(b.seq._str);
-  char mc_score[4]={match,-penalty,-penalty,-penalty};
+  float mc_score[4]={match,-penalty,-penalty,-penalty};
   float score=0;
   int aligned=0,gaps=0,matches=0,mismatches=0;
   int maxsize=MAX(ea-pa,eb-pb);
@@ -1395,6 +1395,8 @@ estr ealignprofile::str()
   return(tmpstr);
 }
 
+
+
 ostream& operator<<(ostream& stream,const ealignprofile& p)
 {
   char tmp;
@@ -1417,6 +1419,134 @@ ostream& operator<<(ostream& stream,const ealignprofile& p)
   }
   return(stream);
 }
+
+int getnum(const estr& astr,int& i)
+{
+  int j;
+  for (j=i+1; j<astr.len() && isdigit(astr[j]); ++j);
+  if (j==i+1) return(1);
+   
+  int count=astr.substr(i+1,j-i-1).i();
+  i=j-1;
+  return(count);
+}
+
+estr sali_decompress(const estr& astr,const eseq& seq2)
+{
+  estr str;
+  int count;
+  uint64_t *ps2=reinterpret_cast<uint64_t*>(seq2.seq._str);
+  int i2=0;
+  for (int i=0; i<astr.len(); ++i){
+    switch(astr[i]){
+      case 'a':
+      case 't':
+      case 'g':
+      case 'c':
+      case 'A':
+      case 'T':
+      case 'G':
+      case 'C':
+        ++i2;
+        str+=astr[i];
+       break;
+      case 'I':
+        count=getnum(astr,i);
+        for (int j=i+1; j<astr.len() && j<i+1+count; ++j)
+          str+=astr[j];
+        i+=count;
+//        cout << "I: " << count << endl;
+       break;
+      case 'D':
+        count=getnum(astr,i);
+        i2+=count;
+//        cout << "D: " << count << endl;
+       break;
+      case 'M':
+        count=getnum(astr,i);
+        for (int j2=i2; i2<seq2.seqlen && j2<i2+count; ++j2)
+          str+=cnuc2chru((ps2[j2/32u]>>((j2%32u)*2ul))&0x03u);
+        i2+=count;       
+//        cout << "M: " << count << endl;
+       break;
+      default:
+       lerror("unexpected character: "+estr(astr[i]));
+       return(estr());
+    }
+  }
+  return(str);
+}
+
+estr ealigndata::compress(const eseq& seq1)
+{
+  uint64_t *ps1=reinterpret_cast<uint64_t*>(seq1.seq._str);
+  ldieif(s1<0 || s1>seq1.seqlen || e1<0 || e1>seq1.seqlen,"start/end mismatch with sequence: "+estr(s1)+","+e1+" seqlen: "+seq1.seqlen);
+  eseq srev(seq1);
+  long ts1=s1,te1=e1;
+  if (revcompl){
+    ts1=seq1.seqlen-e1; te1=seq1.seqlen-s1;
+    srev.revcompl();
+//    srev.setrevcompl(seq1,0,seq1.seqlen);
+    ps1=reinterpret_cast<uint64_t*>(srev.seq._str);
+  }
+  int i=ts1;
+  estr str1;
+  if (i>0){
+    str1+="I";
+    if (i>1)
+      str1+=i;
+    for (int l=0; l<i; ++l)
+      str1+=cnuc2chru((ps1[l/32u]>>((l%32u)*2ul))&0x03u);
+  }
+  if (s2>0){
+    str1+="D";
+    if (s2>1)
+      str1+=s2;
+  }
+
+  for (int k=0; k<profile.elm.size(); ++k){
+    ealignelem& e(profile.elm[k]);
+    switch (e.type){
+      case AT_MATCH:
+        if (e.count>2){
+          str1+="M";
+          str1+=e.count;
+        }else{
+          for (int l=i; l<i+e.count; ++l)
+            str1+=cnuc2chru((ps1[l/32u]>>((l%32u)*2ul))&0x03u);
+        }
+        i+=e.count;
+       break;
+      case AT_MISS:
+        for (int l=i; l<i+e.count; ++l)
+          str1+=cnuc2chru((ps1[l/32u]>>((l%32u)*2ul))&0x03u);
+        i+=e.count;
+       break;
+      case AT_DEL:
+        str1+="D";
+//        if (e.count>1)
+          str1+=e.count;
+       break;
+      case AT_INS:
+        str1+="I";
+        if (e.count>1)
+          str1+=e.count;
+        for (int l=i; l<i+e.count; ++l)
+          str1+=cnuc2chru((ps1[l/32u]>>((l%32u)*2ul))&0x03u);
+        i+=e.count;
+       break;
+    }
+  }
+  if (i<seq1.seqlen){
+    str1+="I";
+    if (seq1.seqlen-i>1)
+      str1+=seq1.seqlen-i;
+    for (int l=i; l<seq1.seqlen; ++l)
+      str1+=cnuc2chru((ps1[l/32u]>>((l%32u)*2ul))&0x03u);
+  }
+  return(str1);
+}
+
 
 
 estr ealigndata::align_str(const eseq& seq1,const eseq& seq2)

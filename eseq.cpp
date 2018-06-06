@@ -13,6 +13,26 @@ char cnuc2chr(uint32_t cc)
   return(larr[cc&0x3]);
 }
 
+char cnuc2chru(uint32_t cc)
+{
+  const char larr[]={'A','T','G','C'};
+  return(larr[cc&0x3]);
+}
+
+
+void eseq::serial(estr& sstr)
+{
+  seriallong(seqlen,sstr);
+  seq.serial(sstr);
+}
+
+long eseq::unserial(const estr& sstr,long i)
+{
+  i=unseriallong(seqlen,sstr,i);
+  if (i==-1) return(i);
+  i=seq.unserial(sstr,i);
+  return(i);
+}
 
 bool eseq::operator<(const eseq& s)
 {
@@ -21,7 +41,7 @@ bool eseq::operator<(const eseq& s)
 
 eseq::eseq(): seqlen(0),seqstart(0) {}
 
-eseq::eseq(estr& ucseq): seqstart(0)
+eseq::eseq(const estr& ucseq): seqlen(0),seqstart(0)
 {
   setseq(ucseq);
 }
@@ -61,7 +81,7 @@ void eseq::setprot(estr& ucseq)
   seq._strlen=((ucseq.len()*3+31u)>>4)<<2;
 }
 
-void eseq::setseq(estr& ucseq)
+void eseq::setseq(const estr& ucseq)
 {
   long i;
   uint32_t tmp;
@@ -69,6 +89,7 @@ void eseq::setseq(estr& ucseq)
 //  useq.reserve(int((ucseq.len()+3)/4)*4);
 //  seq.reserve(int((ucseq.len()+3)/4));
   seq.clear();
+  npos.clear();
   seq.reserve(((ucseq.len()+31u)>>4)<<2);
 
 /*
@@ -98,19 +119,31 @@ void eseq::setseq(estr& ucseq)
   for (i=0; i/4<ucseq.len()/4; i+=4){
     tmp=*(uint32_t*)(&ucseq._str[i]);
     seq._str[i/4]=seq_comp_table[tmp&0xffffu]|(seq_comp_table[(tmp>>16)&0xffffu]<<4);
+//    for (int j=0; j<4; ++j,tmp>>=8u)
+    for (int j=i; j<i+4; ++j)
+      if (ucseq[j]=='N')
+        npos.add(j);
   }
   switch (ucseq.len()%4){
     case 3: 
       tmp=*(uint32_t*)(&ucseq._str[i]);
       seq._str[i/4]=seq_comp_table[tmp&0xffffu]|(seq_comp_table[(tmp>>16)&0x00ffu]<<4);
+      for (int j=i; j<i+3; ++j)
+        if (ucseq[j]=='N')
+          npos.add(j);
      break;
     case 2: 
       tmp=*(uint32_t*)(&ucseq._str[i]);
       seq._str[i/4]=seq_comp_table[tmp&0xffffu];
+      for (int j=i; j<i+2; ++j)
+        if (ucseq[j]=='N')
+          npos.add(j);
      break;
     case 1: 
       tmp=*(uint32_t*)(&ucseq._str[i]);
       seq._str[i/4]=seq_comp_table[tmp&0x00ffu];
+      if (ucseq[i]=='N')
+        npos.add(i);
      break;
   }
 //  seq._strlen=int((ucseq.len()+3)/4);
@@ -135,6 +168,12 @@ void eseq::revcompl()
     pstr2[p2/32u]=(pstr2[p2/32u]&(~(0x3ul<<(2u*(p2%32u))))) | (((long int)(revnuc[v1]))<<(2u*(p2%32u)));
   }
   seq=tmpseq;
+  if (npos.size()){
+    eintarray tmpnpos;
+    for (int j=npos.size()-1; j>=0; --j)
+      tmpnpos.add(seqlen-npos[j]);
+    npos=tmpnpos;
+  }
 }
 
 
@@ -224,15 +263,21 @@ estr eseq::print_seq(int i,int e) const
   ldieif(i>e,"error start pos larger than end pos");
   estr tmp;
   tmp.reserve(e-i);
-  for (; i<e; ++i){
-    v1=(i%32u==0?pstr1[i/32u]:pstr1[i/32u]>>(2u*(i%32u)))&0x3u;
+  for (int ti=i; ti<e; ++ti){
+    v1=(ti%32u==0?pstr1[ti/32u]:pstr1[ti/32u]>>(2u*(ti%32u)))&0x3u;
     switch(v1){
-      case 0: tmp+='a'; break;
-      case 1: tmp+='t'; break;
-      case 2: tmp+='g'; break;
-      case 3: tmp+='c'; break;
+      case 0: tmp+='A'; break;
+      case 1: tmp+='T'; break;
+      case 2: tmp+='G'; break;
+      case 3: tmp+='C'; break;
     }
   }
+  for (int j=0; j<npos.size(); ++j){
+    if (npos[j]<i) continue;
+    else if (npos[j]>=e) break;
+    tmp[npos[j]-i]='N';
+  }
+    
   return(tmp);
 }
 

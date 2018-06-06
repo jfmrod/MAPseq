@@ -37,10 +37,11 @@ class eseq
   estr seq;
   long seqlen;
   long seqstart;
+  eintarray npos;
 
   eseq();
-  eseq(estr& seq);
-  void setseq(estr& seq);
+  eseq(const estr& seq);
+  void setseq(const estr& seq);
   void setprot(estr& seq);
   void revcompl();
   void setrevcompl(const eseq& seq,long i,long e);
@@ -49,9 +50,13 @@ class eseq
   eseq subseq(int i,int l) const;
   bool operator<(const eseq& s);
   friend ostream& operator<<(ostream& stream,const eseq& seq);
+
+  void serial(estr& sstr);
+  long unserial(const estr& sstr,long i);
 };
 
 char cnuc2chr(uint32_t cc);
+char cnuc2chru(uint32_t cc);
 
 ostream& operator<<(ostream& stream,const eseq& seq);
 
