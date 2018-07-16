@@ -4,6 +4,12 @@
 extern unsigned char seq_comp_table[];
 extern unsigned char prot_comp_table[];
 
+#define PKMERSIZE 9ul
+#define PKMERBITS (PKMERSIZE*2ul)
+#define PMAXSIZE (1ul<<PKMERBITS)
+#define PKMERMAX (1ul<<PKMERBITS)
+#define PKMERMASK (PMAXSIZE-1ul)
+
 const uint32_t revnuc[]={0x1u,0x0u,0x3u,0x2u};
 const unsigned long safe_shift[32]={0x0ul,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful,0xfffffffffffffffful};
 
@@ -19,6 +25,11 @@ char cnuc2chru(uint32_t cc)
   return(larr[cc&0x3]);
 }
 
+unsigned long seqpkmer(const eseq& s,long p1)
+{
+  unsigned long *pstr1=reinterpret_cast<unsigned long*>(s.seq._str);
+  return(((pstr1[p1/32u]>>(2u*(p1%32u)))|((pstr1[p1/32u+1u]<<(64u-2u*(p1%32u)))&safe_shift[p1%32u]))&PKMERMASK);
+}
 
 void eseq::serial(estr& sstr)
 {
@@ -39,15 +50,16 @@ bool eseq::operator<(const eseq& s)
   return(seqlen>s.seqlen);
 }
 
-eseq::eseq(): seqlen(0),seqstart(0) {}
+eseq::eseq(): seqlen(0),seqstart(0),prot(false) {}
 
-eseq::eseq(const estr& ucseq): seqlen(0),seqstart(0)
+eseq::eseq(const estr& ucseq): seqlen(0),seqstart(0),prot(false)
 {
   setseq(ucseq);
 }
 
 void eseq::setprot(estr& ucseq)
 {
+  prot=true;
   long i;
   uint32_t tmp;
 //  estr useq;
@@ -83,6 +95,7 @@ void eseq::setprot(estr& ucseq)
 
 void eseq::setseq(const estr& ucseq)
 {
+  prot=false;
   long i;
   uint32_t tmp;
 //  estr useq;

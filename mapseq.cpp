@@ -10,6 +10,8 @@
 #include <eutils/esystem.h>
 #include <eutils/eoption.h>
 #include <eutils/edaemon.h>
+#include <eutils/earrayof.h>
+#include <eutils/eblockarray.h>
 #include <deque>
 #include <unistd.h>
 
@@ -51,6 +53,12 @@ using namespace std;
 #define KMERMAX2 (1ul<<KMERBITS2)
 #define KMERMASK2 (MAXSIZE2-1ul)
 
+#define PKMERSIZE 9ul
+#define PKMERBITS (PKMERSIZE*2ul)
+#define PMAXSIZE (1ul<<PKMERBITS)
+#define PKMERMAX (1ul<<PKMERBITS)
+#define PKMERMASK (PMAXSIZE-1ul)
+
 
 
 const uint32_t nuc[]={'a','t','g','c','u'};
@@ -71,6 +79,7 @@ int minid2=1;
 int otulim=50;
 float lambda=1.280;
 float sweight=30.0;
+float sweightabs=0.1;
 
 /*
 const float matchcost=2.0;
@@ -82,6 +91,7 @@ const float gapopen=-5.0;
 //const ealignscore as(1.0,2.0,10.0,1.0);
 //const ealignscore as(2.0,1.0,5.0,1.0,30.0);
 const ealignscore as(1.0,1.0,5.0,1.0,20.0);
+const epalignscore pas(prot_blosum62,aacount,4.0,10.0,2.0,30.0);
 //const ealignscore as(2.0,1.0,5.0,1.0,30.0);
 
 const int NCOUNT_MAXLEN=1600; // IMPORTANT: must be disivible by 8 to be 64bit aligned
@@ -109,6 +119,7 @@ class etax
 };
 
 typedef ebasicarray<unsigned int> euintarray;
+typedef eblockarray<uint32_t> ekmerarray;
 
 class esearchws
 {
@@ -246,6 +257,24 @@ estr kmer2str(uint32_t kmer)
   }
   return(tmpstr);
 }
+estr ckmer2str(uint32_t kmer)
+{
+  estr tmp;
+  tmp+="("+kmer2str(kmer)+")";
+  kmer=kmer_prot_lt[kmer&PKMERMASK];
+  for (int i=0; i<PKMERSIZE; i+=3,kmer>>=6u){
+    tmp+=aa[kmer&((1u<<6u)-1u)];
+  }
+  return(tmp);
+}
+estr pkmer2str(uint32_t kmer)
+{
+  estr tmp;
+  for (int i=0; i<PKMERSIZE; i+=3,kmer>>=6u){
+    tmp+=aa[kmer&((1u<<6u)-1u)];
+  }
+  return(tmp);
+}
 
 class eseqcluster
 {
@@ -262,7 +291,7 @@ class eseqdb
   estrhashof<int> seqind;
   eintarray seqotu;
   earray<eintarray> otus;
-  ebasicarray<deque<uint32_t> > otukmers;
+  ebasicarray<ekmerarray> otukmers;
   ebasicarray<etax> taxa;
 };
 
@@ -436,6 +465,20 @@ inline void sumcounts(unsigned char* tncount,int p1,uint64_t tmpnuc)
     tncount[p1+i]|=(tmpnuc&0xff);
 */
 //  cout << uint2hex(tmpstr,*p) << " " << uint2hex(tmpstr2,tmpnuc) << " " << uint2hex(tmpstr3,tncount[p1]) << endl;
+}
+
+void pseqncount(const eseq& s1,long p1,long e1,const eseq& s2,long p2,long e2,ealigndata& adata,const epalignscore& pas)
+{
+//  cout << "s2seqlen: " << s2.seqlen << endl;
+  int k;
+//  for (int i=0; i+PKMERSIZE<=e1-p1; i+=PKMERSIZE){
+//    cout << p1+i << ": " << ckmer2str(seqpkmer(s1,p1+i)) << " = p2: " << p2+i << ": " << pkmer2str(seqpkmer(s2,p2+i)) << endl;
+//    cout << " = p1: " << p1+i-1 << ": " << ckmer2str(seqpkmer(s1,p1+i-1)) << endl;
+//    cout << " = p1: " << p1+i+1 << ": " << ckmer2str(seqpkmer(s1,p1+i+1)) << endl;
+//  }
+  adata.matches+=(e1-p1)/3;
+  adata._score+=(e1-p1)*pas.pmatch/3;
+  adata.profile.add(AT_MATCH,(e1-p1)/3);
 }
 
 void seqncount(const eseq& s1,long p1,long e1,const eseq& s2,long p2,long e2,ealigndata& adata,const ealignscore& as)
@@ -1760,6 +1803,215 @@ void seqident_global(const eseq& s1,eintarray& kmerpos1,const eseq& s2,ealigndat
 }
 */
 
+#define align(a,b) (a-(a)%b)
+
+void pseqident_local(const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const epalignscore& pas,long s1_start=0,long s1_end=0)
+{
+  long p1,p2;
+  unsigned long *pstr1=reinterpret_cast<unsigned long*>(s1.seq._str);
+  unsigned long *pstr2=reinterpret_cast<unsigned long*>(s2.seq._str);
+  unsigned long v1,v2;
+  long lastkmerlen,lastkmerpos,lastndelta;
+  if (s1_end==0) s1_end=s1.seqlen;
+  long s1_len=s1_end-s1_start;
+
+//  for (int i=0; i<11; ++i)
+//    match[i]=0;
+  adata.matches=0; adata.mismatches=0; adata.gaps=0; adata._score=0.0;
+  adata.s1=-1; adata.e1=-1;
+  adata.s2=-1; adata.e2=-1;
+
+  char tmp[5];
+  char itmp;
+  int k;
+
+  ebasicarray<ediag> diags;
+  ebasicarray<ediag> dheap;
+
+  t2.reset();
+    lastkmerpos=s1_start-2*long(PKMERSIZE);
+    lastkmerlen=0;
+    lastndelta=-s1_end-s2.seqlen;
+    for (p1=s1_start; p1<s1_end-32; p1+=k){
+      v1=pstr1[p1/32u]>>(2u*(p1%32u));
+      v1|=(pstr1[p1/32u+1u]<<(64u-2u*(p1%32u)))&safe_shift[p1%32u];
+      for (k=0; k<32u-PKMERSIZE; k+=3,v1>>=6u){
+        long d=p1+k-lastkmerpos;
+        if (d<=PKMERSIZE && p1+k+lastndelta>=0 && p1+k+lastndelta+PKMERSIZE<=s2.seqlen && kmer_prot_lt[(v1&PKMERMASK)]==seqpkmer(s2,p1+k+lastndelta))
+        {
+          lastkmerlen+=d;
+          lastkmerpos=p1+k;
+        }else{
+          long kpos2=sws.kmerpos2[kmer_prot_lt[v1&PKMERMASK]];
+          if (kpos2>sws.offset2){
+            kpos2-=sws.offset2;
+          
+            if (d<=PKMERSIZE && (lastndelta==kpos2-p1-k)){
+              lastkmerlen+=d;
+            }else{
+              if (lastkmerlen){
+                cout << "p1: " << lastkmerpos-lastkmerlen+PKMERSIZE<< "," << lastkmerpos+PKMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << " kpos2: " << kpos2 << " p1+k: " << p1+k << endl;
+                diags.add(ediag(lastkmerpos-lastkmerlen+PKMERSIZE,lastndelta,lastkmerlen));
+              }
+              lastkmerlen=PKMERSIZE;
+              lastndelta=kpos2-p1-k;
+            }
+            lastkmerpos=p1+k;
+          }
+        }
+      }
+    }
+    v1=pstr1[p1/32u]>>(2u*(p1%32u));
+    v1|=(pstr1[p1/32u+1u]<<(64u-2u*(p1%32u)))&safe_shift[p1%32u];
+    for (k=0; p1+k+PKMERSIZE<s1_end; k+=3,v1>>=6u){
+      long kpos2=sws.kmerpos2[kmer_prot_lt[v1&PKMERMASK]];
+      if (kpos2>sws.offset2){
+        kpos2-=sws.offset2;
+        long d=p1+k-lastkmerpos;
+        if (d<=PKMERSIZE && ((lastndelta==kpos2-p1-k) || (p1+k+lastndelta+PKMERSIZE<=s2.seqlen && kmer_prot_lt[(v1&PKMERMASK)]==seqpkmer(s2,p1+k+lastndelta)))){
+          lastkmerlen+=d;
+        }else{
+          if (lastkmerlen){
+            diags.add(ediag(lastkmerpos-lastkmerlen+PKMERSIZE,lastndelta,lastkmerlen));
+          }
+          lastkmerlen=PKMERSIZE;
+          lastndelta=kpos2-p1-k;
+        }
+        lastkmerpos=p1+k;
+      }
+    }
+    if (lastkmerlen){
+      diags.add(ediag(lastkmerpos-lastkmerlen+PKMERSIZE,lastndelta,lastkmerlen));
+      cout << "end p1: " << lastkmerpos-lastkmerlen+PKMERSIZE << "," << lastkmerpos+PKMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+    }
+  tdp1=tdp1*0.99+t2.lap()*0.01;
+
+  if (diags.size()==0){
+//    lderror("no shared segments found");
+    return;
+  }
+
+  // sparse dynamic programming to find longest chain of segments
+  ediag *bestseg=&diags[0];
+  multimap<long,ediag*> segments;
+  for (long j=0; j<diags.size(); ++j){
+    ediag& diag(diags.at(j));
+    diag.V=(diag.j-diag.i)*pas.pmatch/3; // should compute protein match score
+    if (diag.V > bestseg->V) bestseg=&diag;
+    segments.insert(pair<long,ediag*>(diag.i,&diag));
+    segments.insert(pair<long,ediag*>(diag.j,&diag));
+  }
+
+  multimap<long,ediag*> Lsegments;
+  multimap<long,ediag*>::iterator sit;
+  multimap<long,ediag*>::iterator slb;
+  for (sit=segments.begin(); sit!=segments.end(); ++sit){
+//      cout << "x: " << sit->first << " start: " << (sit->first==sit->second->i?"1":"0") << " i: " << sit->second->i << " i2: " << sit->second->i2 << " Lsegs: " << Lsegments.size() << endl;
+    if (sit->first==sit->second->i) { // start of rectangle
+//      if (Lsegments.size()==0) continue;
+//      slb=Lsegments.upper_bound(sit->second->i2-1);
+//      if (slb==Lsegments.end()) continue;
+      ediag *tmpbest=0x00;
+      double tmpbestscore=(sit->second->j-sit->second->i)*pas.pmatch/3;
+      for (slb=Lsegments.begin(); slb!=Lsegments.end(); ++slb){
+        if (slb->first >= sit->second->i2) break;
+//      sit->second->V=sit->second->j-sit->second->i+slb->second->V;
+        long gapdiff=abs((sit->second->i-sit->second->i2)-(slb->second->i-slb->second->i2));
+        double tmpscore=(sit->second->j-sit->second->i)*pas.pmatch/3 - gapdiff*pas.gapext/3 -(gapdiff>0?pas.gapopen:0) + slb->second->V;
+        if (tmpscore>tmpbestscore) { tmpbestscore=tmpscore; tmpbest=slb->second; }
+      }
+      sit->second->bestseg=tmpbest;
+      sit->second->V=tmpbestscore;
+      
+//      sit->second->V=(sit->second->j-sit->second->i)*as.match-gapdiff*as.gapext-(gapdiff>0?as.gapopen:0)+ MIN(sit->second->j-slb->second->i,sit->second->j2-slb->second->i2)*(9.0/10.0*as.match-1.0/10.0*as.mismatch) +slb->second->V;
+/*
+      sit->second->bestseg=0x00;
+      double newscore=-gapdiff*as.gapext-(gapdiff>0?as.gapopen:0)+ MIN(sit->second->j-slb->second->i,sit->second->j2-slb->second->i2)*(7.0/8.0*as.match-1.0/8.0*as.mismatch) +slb->second->V;
+      if (sit->second->V+MIN(sit->second->i,sit->second->j)*(7.0/8.0*as.match-1.0/8.0*as.mismatch) < newscore){
+        sit->second->V=newscore;
+        sit->second->bestseg=slb->second;
+      }else{
+        sit->second->V+=MIN(sit->second->i,sit->second->j)*(7.0/8.0*as.match-1.0/8.0*as.mismatch);
+      }
+*/
+//        double newscore=(sit->second->j-sit->second->i)*as.match - gapdiff*as.gapext-(gapdiff>0?as.gapopen:0) + slb->second->V;
+//      if (sit->second->V < newscore){
+//        sit->second->V=newscore;
+//        sit->second->bestseg=slb->second;
+//      }
+//      cout << "linking to: " << sit->second->i << " " << slb->second->j << endl;
+    } else {  // end of rectangle
+      slb=Lsegments.lower_bound(sit->second->j2);
+      if (slb==Lsegments.end() || sit->second->V > slb->second->V){
+        while (slb!=Lsegments.end()){
+          if (slb->second->j2>=sit->second->j2 && slb->second->V<=sit->second->V){
+            Lsegments.erase(slb++);
+            continue;
+          }
+          ++slb;
+        }
+        if (bestseg==0x00 || sit->second->V > bestseg->V)
+          bestseg=sit->second;
+        Lsegments.insert(pair<long,ediag*>(sit->second->j2,sit->second));
+      }
+    }
+  }
+  tdp2=tdp2*0.99+t2.lap()*0.01;
+
+  int rf=s1_start%3;
+  float tmpflanks=0.0;
+  ldieif(s2.seqlen<=bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2));
+  long minright=MIN(align(s1.seqlen-bestseg->j,3)+rf,s2.seqlen-bestseg->j2);
+//  seqcalign_global_norightedgegap(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,alignws);
+//  cout << "rf: " << rf << " j: " << bestseg->j << " j2: "<<bestseg->j2 << endl;
+//  ldieif(bestseg->j2%3!=0,"not protein aligned");
+//  ldieif(bestseg->j%3!=s1_start%3,"not equal codon alignment: "+estr(bestseg->j)+" "+estr(s1_start));
+  pseqcalign_local_rightext(s1,bestseg->j,align(MIN(s1.seqlen,bestseg->j+2*minright),3)+rf,s2,bestseg->j2,align(MIN(s2.seqlen,bestseg->j2+2*minright),3),adata,sws.alignws,pas);
+  tmpflanks+=t2.lap();
+  adata.profile.add(AT_RIGHT);
+  LDEBUG(D_SEQIDENT,cout << "rightid: " << bestseg->j << "," << s1_end << " l: " << s1_end-bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+  while (bestseg!=0x00 && bestseg->bestseg != 0x00){
+    pseqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,pas);
+    adata.profile.add(AT_ID);
+    LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+    long gapdiff=abs((bestseg->bestseg->i-bestseg->bestseg->i2)-(bestseg->i-bestseg->i2));
+    pseqcalign_global(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,sws.alignws,pas);
+    adata.profile.add(AT_ALIGN);
+    LDEBUG(D_SEQIDENT,cout << "segid: " << bestseg->bestseg->j << "," << bestseg->i << " l: " << bestseg->i-bestseg->bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << " gapdiff: " << gapdiff << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//    cout << "segid: " << bestseg->i << "," << bestseg->j << " l: " << bestseg->j-bestseg->i << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl;
+    bestseg=bestseg->bestseg;
+  }
+  pseqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,pas);
+  adata.profile.add(AT_ID);
+  LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+
+
+  tdpmd=tdpmd*0.99+t2.lap()*0.01;
+//  seqident_seg_left_local(s1,bestseg->i,s2,bestseg->i2,adata,tncounts);
+  long minleft=MIN(align(bestseg->i,3)+rf,bestseg->i2);
+  pseqcalign_local_leftext(s1,rf+MAX(0,align(bestseg->i-2*minleft,3)),bestseg->i,s2,MAX(0,align(bestseg->i2-2*minleft,3)),bestseg->i2,adata,sws.alignws,pas);
+  adata.profile.add(AT_LEFT);
+  tmpflanks+=t2.lap();
+  tdpfl=tdpfl*0.99+tmpflanks*0.01;
+
+//  estr as1,as2;
+//  seqcalign_global_noleftedgegap(s1,0,bestseg->i,s2,0,bestseg->i2,as1,as2);
+//  cout << endl;
+//  cout << as1 << endl << as2 << endl;
+  LDEBUG(D_SEQIDENT,cout << "leftid: "<< bestseg->i << " l: " << (bestseg->i<bestseg->i2?bestseg->i:bestseg->i2) << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//  cout << "partial alignment" << endl;
+//  print_seqali(pas1,pas2);
+
+  return;
+}
+
+
+
 void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarray& kmerpos1,esearchws& sws,ebasicarray<ediag> &diags)
 {
   long p1,p2;
@@ -2527,6 +2779,26 @@ void setkmerpos(euintarray& kmerpos,eseq& s,unsigned int offset)
     kmerpos[v&KMERMASK]=offset+p+k;
 }
 
+void setpkmerpos(euintarray& kmerpos,eseq& s,unsigned int offset)
+{
+  unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
+  unsigned long v;
+  int k;
+  long p;
+  for (p=0; p+32<s.seqlen; p+=k){
+    v=pstr[p/32u]>>(2u*(p%32u));
+    v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+    for (k=0; k+PKMERSIZE<32; k+=3u,v>>=6u)
+//      kmerpos[kmer_prot_lt[v&PKMERMASK]]=offset+p+k;
+      kmerpos[v&PKMERMASK]=offset+p+k;
+  }
+  v=pstr[p/32u]>>(2u*(p%32u));
+  v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+  for (k=0; p+k+PKMERSIZE<s.seqlen; k+=3u,v>>=6u)
+//    kmerpos[kmer_prot_lt[v&PKMERMASK]]=offset+p+k;
+    kmerpos[v&PKMERMASK]=offset+p+k;
+}
+
 
 
 void kmercount_single3(ebasicarray<deque<int>*>& otukmers,eseq& s,uint32_t sp,uint32_t rp,ebasicarray<uint32_t>& idcount,eintarray& kmerpos)
@@ -2628,7 +2900,7 @@ void kmercount_single2(ebasicarray<deque<int>*>& otukmers,eseq& s,uint32_t rp,eb
   }
 }
 
-void kmercount_single(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,ebasicarray<uint32_t>& idcount,eintarray& kmerpos)
+void kmercount_single(ebasicarray<ekmerarray>& otukmers,eseq& s,ebasicarray<uint32_t>& idcount,eintarray& kmerpos,const euintarray& otukmersize)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -2639,7 +2911,52 @@ void kmercount_single(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,ebasicarra
     v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
     for (k=0; k<32-KMERSIZE; ++k,v>>=2u){
 //      if (otukmers[v&KMERMASK]){
-        deque<uint32_t> &otuind(otukmers[v&KMERMASK]);
+        ekmerarray &otuind(otukmers[v&KMERMASK]);
+        unsigned int otuindsize=otukmersize[v&KMERMASK];
+        for (unsigned int l=0; l<otuindsize; ++l){
+          unsigned int tl=otuind[l];
+          unsigned long d=p+k-kmerpos[tl];
+          if (d>KMERSIZE) d=KMERSIZE;
+//          if (d==1 || d==KMERSIZE)
+            idcount[tl]+=d;
+          kmerpos[tl]=p+k;
+        }
+//      }
+    }
+  }
+
+//  cout << "p: " << p << " seqlen: " << s.seqlen << endl;
+
+  v=pstr[p/32u]>>(2u*(p%32u));
+  v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+  for (k=0; p+k<long(s.seqlen)-long(KMERSIZE); ++k,v>>=2u){
+//    if (otukmers[v&KMERMASK]){
+      ekmerarray &otuind(otukmers[v&KMERMASK]);
+      unsigned int otuindsize=otukmersize[v&KMERMASK];
+      for (unsigned int l=0; l<otuindsize; ++l){
+        unsigned int tl=otuind[l];
+        unsigned long d=p+k-kmerpos[tl];
+        if (d>KMERSIZE) d=KMERSIZE;
+//        if (d==1 || d==KMERSIZE)
+          idcount[tl]+=d;
+        kmerpos[tl]=p+k;
+      }
+//    }
+  }
+}
+
+void kmercount_single(ebasicarray<ekmerarray>& otukmers,eseq& s,ebasicarray<uint32_t>& idcount,eintarray& kmerpos)
+{
+  unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
+  unsigned long v;
+  int k;
+  long p=0;
+  for (; p<long(s.seqlen)-32; p+=32-KMERSIZE){
+    v=pstr[p/32u]>>(2u*(p%32u));
+    v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+    for (k=0; k<32-KMERSIZE; ++k,v>>=2u){
+//      if (otukmers[v&KMERMASK]){
+        ekmerarray &otuind(otukmers[v&KMERMASK]);
         for (unsigned int l=0; l<otuind.size(); ++l){
           unsigned int tl=otuind[l];
           unsigned long d=p+k-kmerpos[tl];
@@ -2658,7 +2975,7 @@ void kmercount_single(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,ebasicarra
   v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
   for (k=0; p+k<long(s.seqlen)-long(KMERSIZE); ++k,v>>=2u){
 //    if (otukmers[v&KMERMASK]){
-      deque<uint32_t> &otuind(otukmers[v&KMERMASK]);
+      ekmerarray &otuind(otukmers[v&KMERMASK]);
       for (unsigned int l=0; l<otuind.size(); ++l){
         unsigned int tl=otuind[l];
         unsigned long d=p+k-kmerpos[tl];
@@ -2674,7 +2991,69 @@ void kmercount_single(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,ebasicarra
 uint32_t bmask_lt[2]={0x0u,0xffffffffu};
 int16_t idc_lt[2]={1,-1};
 
-void kmercount_both_nopos2_skip(int scount,ebasicarray<deque<uint32_t> >& otukmers,eseq& s,unsigned long start,unsigned long end,eintarray& idcount,eintarray& kmerpos,unsigned int *akmers,unsigned long akmask,int skipn)
+// 6 frame translation kmer search
+void kmercount_both_prot_skip(int scount,ebasicarray<ekmerarray>& otukmers,eseq& s,unsigned long start,unsigned long end,eintarray& idcount,eintarray& kmerpos,unsigned int *akmers,unsigned long akmask,int skipn)
+{
+  unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
+  unsigned long v;
+  int k;
+  long p=start;
+  for (; p+32<end; p+=32-PKMERSIZE){
+    v=pstr[p/32u]>>(2u*(p%32u));
+    v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+    for (k=0; k<32-PKMERSIZE; ++k,v>>=2u){
+//      cout << p+k << " : " << kmer2str(v&KMERMASK) << " -- " << pkmer2str(kmer_prot_lt[v&PKMERMASK]) << endl;
+//      if ((p+k)%skipn) continue;
+//      cout << kmer2str(v&KMERMASK) << " " << kmer2str(kmer_rev_lt[v&KMERMASK]) << endl;
+//      if (otukmers[v&KMERMASK]){
+//      if (akmers[v&akmask]){
+      {
+        ekmerarray &otuind(otukmers[kmer_prot_lt[v&PKMERMASK]]);
+        for (unsigned int l=0; l<otuind.size(); ++l)
+          ++idcount[scount*((p+k)%3)*2+(otuind[l]&BMASK31)];
+//          idcount[scount*((p+k)%3)*2+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
+      }
+//      }
+//      if (akmers[kmer_rev_lt[v&KMERMASK]&akmask]){
+//      if (otukmers[kmer_rev_lt[v&KMERMASK]]){
+      {
+        ekmerarray &otuind(otukmers[kmer_protrev_lt[v&PKMERMASK]]);
+        for (unsigned int l=0; l<otuind.size(); ++l)
+          ++idcount[scount*((p+k)%3)*2+scount+(otuind[l]&BMASK31)];
+//          idcount[scount*((p+k)%3)*2+scount+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
+      }
+//      }
+    }
+  }
+
+//  cout << "p: " << p << " seqlen: " << s.seqlen << endl;
+
+  v=pstr[p/32u]>>(2u*(p%32u));
+  v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+  for (k=0; p+k+PKMERSIZE<end; ++k,v>>=2u){
+//    if ((p+k)%skipn) continue;
+//    if (otukmers[v&KMERMASK]){
+//    if (akmers[v&akmask]){
+    {
+      ekmerarray &otuind(otukmers[kmer_prot_lt[v&PKMERMASK]]);
+      for (unsigned int l=0; l<otuind.size(); ++l)
+        ++idcount[scount*((p+k)%3)*2+(otuind[l]&BMASK31)];
+//        idcount[scount*((p+k)%3)*2+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
+    }
+//    }
+//    if (otukmers[kmer_rev_lt[v&KMERMASK]]){
+//    if (akmers[kmer_rev_lt[v&KMERMASK]&akmask]){
+    {
+      ekmerarray &otuind(otukmers[kmer_protrev_lt[v&PKMERMASK]]);
+      for (unsigned int l=0; l<otuind.size(); ++l)
+        ++idcount[scount*((p+k)%3)*2+scount+(otuind[l]&BMASK31)];
+//        idcount[scount*((p+k)%3)*2+scount+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
+    }
+//    }
+  }
+}
+
+void kmercount_both_nopos2_skip(int scount,ebasicarray<ekmerarray>& otukmers,eseq& s,unsigned long start,unsigned long end,eintarray& idcount,eintarray& kmerpos,unsigned int *akmers,unsigned long akmask,int skipn)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -2688,14 +3067,14 @@ void kmercount_both_nopos2_skip(int scount,ebasicarray<deque<uint32_t> >& otukme
 //      cout << kmer2str(v&KMERMASK) << " " << kmer2str(kmer_rev_lt[v&KMERMASK]) << endl;
 //      if (otukmers[v&KMERMASK]){
       if (akmers[v&akmask]){
-        deque<uint32_t> &otuind(otukmers[v&KMERMASK]);
+        ekmerarray &otuind(otukmers[v&KMERMASK]);
         for (unsigned int l=0; l<otuind.size(); ++l)
           ++idcount[(otuind[l]&BMASK31)];
 //          idcount[(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
       }
       if (akmers[kmer_rev_lt[v&KMERMASK]&akmask]){
 //      if (otukmers[kmer_rev_lt[v&KMERMASK]]){
-        deque<uint32_t> &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
+        ekmerarray &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
         for (unsigned int l=0; l<otuind.size(); ++l)
 //          idcount[scount+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
           ++idcount[scount+(otuind[l]&BMASK31)];
@@ -2711,14 +3090,14 @@ void kmercount_both_nopos2_skip(int scount,ebasicarray<deque<uint32_t> >& otukme
     if ((p+k)%skipn) continue;
 //    if (otukmers[v&KMERMASK]){
     if (akmers[v&akmask]){
-      deque<uint32_t> &otuind(otukmers[v&KMERMASK]);
+      ekmerarray &otuind(otukmers[v&KMERMASK]);
       for (unsigned int l=0; l<otuind.size(); ++l)
         ++idcount[(otuind[l]&BMASK31)];
 //        idcount[(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
     }
 //    if (otukmers[kmer_rev_lt[v&KMERMASK]]){
     if (akmers[kmer_rev_lt[v&KMERMASK]&akmask]){
-      deque<uint32_t> &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
+      ekmerarray &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
       for (unsigned int l=0; l<otuind.size(); ++l)
         ++idcount[scount+(otuind[l]&BMASK31)];
 //        idcount[scount+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
@@ -2726,7 +3105,7 @@ void kmercount_both_nopos2_skip(int scount,ebasicarray<deque<uint32_t> >& otukme
   }
 }
 
-void kmercount_both_nopos2(int scount,ebasicarray<deque<uint32_t> >& otukmers,eseq& s,eintarray& idcount,eintarray& kmerpos,unsigned int *akmers,unsigned long akmask)
+void kmercount_both_nopos2(int scount,ebasicarray<ekmerarray>& otukmers,eseq& s,eintarray& idcount,eintarray& kmerpos,unsigned int *akmers,unsigned long akmask)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -2739,13 +3118,13 @@ void kmercount_both_nopos2(int scount,ebasicarray<deque<uint32_t> >& otukmers,es
 //      cout << kmer2str(v&KMERMASK) << " " << kmer2str(kmer_rev_lt[v&KMERMASK]) << endl;
 //      if (otukmers[v&KMERMASK]){
       if (akmers[v&akmask]){
-        deque<uint32_t> &otuind(otukmers[v&KMERMASK]);
+        ekmerarray &otuind(otukmers[v&KMERMASK]);
         for (unsigned int l=0; l<otuind.size(); ++l)
           idcount[(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
       }
       if (akmers[kmer_rev_lt[v&KMERMASK]&akmask]){
 //      if (otukmers[kmer_rev_lt[v&KMERMASK]]){
-        deque<uint32_t> &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
+        ekmerarray &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
         for (unsigned int l=0; l<otuind.size(); ++l)
           idcount[scount+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
       }
@@ -2759,13 +3138,13 @@ void kmercount_both_nopos2(int scount,ebasicarray<deque<uint32_t> >& otukmers,es
   for (k=0; p+k+KMERSIZE<s.seqlen; ++k,v>>=2u){
 //    if (otukmers[v&KMERMASK]){
     if (akmers[v&akmask]){
-      deque<uint32_t> &otuind(otukmers[v&KMERMASK]);
+      ekmerarray &otuind(otukmers[v&KMERMASK]);
       for (unsigned int l=0; l<otuind.size(); ++l)
         idcount[(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
     }
 //    if (otukmers[kmer_rev_lt[v&KMERMASK]]){
     if (akmers[kmer_rev_lt[v&KMERMASK]&akmask]){
-      deque<uint32_t> &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
+      ekmerarray &otuind(otukmers[kmer_rev_lt[v&KMERMASK]]);
       for (unsigned int l=0; l<otuind.size(); ++l)
         idcount[scount+(otuind[l]&BMASK31)]+=idc_lt[otuind[l]>>31u];
     }
@@ -3051,7 +3430,7 @@ void kmercount(earray<eintarray>& otus,ebasicarray<eintarray*>& otukmers,int seq
 }
 
 
-void kmercount_single_nopos(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,uint64_t *bitmask,ebasicarray<uint32_t>& idcount,eintarray& tmpkmers,int ti,int& kmercount,uint32_t& bid,short& bcount,unsigned int *akmers,unsigned long akmask)
+void kmercount_single_nopos(ebasicarray<ekmerarray>& otukmers,eseq& s,uint64_t *bitmask,ebasicarray<uint32_t>& idcount,eintarray& tmpkmers,int ti,int& kmercount,uint32_t& bid,short& bcount,unsigned int *akmers,unsigned long akmask)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -3067,7 +3446,7 @@ void kmercount_single_nopos(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,uint
       if (akmers[v&akmask]==0x0u || tmpkmers[kmer]==ti) continue;
       ++kmercount;
       tmpkmers[kmer]=ti;
-      deque<uint32_t> &otuind(otukmers[kmer]);
+      ekmerarray &otuind(otukmers[kmer]);
       for (unsigned int l=0; l<otuind.size(); ++l){
         uint32_t oi=otuind[l]&BMASK31;
         uint16_t bt=(bitmask[oi/64u]>>(oi%64u))&0x1ul;
@@ -3090,7 +3469,7 @@ void kmercount_single_nopos(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,uint
     if (akmers[v&akmask]==0x0u || tmpkmers[kmer]==ti) continue;
     ++kmercount;
     tmpkmers[kmer]=ti;
-    deque<uint32_t> &otuind(otukmers[kmer]);
+    ekmerarray &otuind(otukmers[kmer]);
     for (unsigned int l=0; l<otuind.size(); ++l){
       uint32_t oi=otuind[l]&BMASK31;
       uint16_t bt=(bitmask[oi/64u]>>(oi%64u))&0x1ul;
@@ -3106,7 +3485,7 @@ void kmercount_single_nopos(ebasicarray<deque<uint32_t> >& otukmers,eseq& s,uint
 
 
 
-void otuaddkmerdiff(ebasicarray<deque<uint32_t> >& otukmers,eseq& s1,eseq& s2,eintarray& tmpkmers,int ti,int pi,unsigned int *akmers,unsigned long akmask)
+void otuaddkmerdiff(ebasicarray<ekmerarray>& otukmers,eseq& s1,eseq& s2,eintarray& tmpkmers,int ti,int pi,unsigned int *akmers,unsigned long akmask)
 {
   unsigned long v;
   long p;
@@ -3120,7 +3499,7 @@ void otuaddkmerdiff(ebasicarray<deque<uint32_t> >& otukmers,eseq& s1,eseq& s2,ei
     for (int k=0; k<32-KMERSIZE; ++k,v>>=2u){
       if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
       if (tmpkmers[v&KMERMASK]!=ti) // kmer not in new sequence
-        otukmers[v&KMERMASK].push_back(pi|(1u<<31u));
+        otukmers[v&KMERMASK].add(pi|(1u<<31u));
       tmpkmers[v&KMERMASK]=-ti;
     }
   }
@@ -3129,7 +3508,7 @@ void otuaddkmerdiff(ebasicarray<deque<uint32_t> >& otukmers,eseq& s1,eseq& s2,ei
   for (int k=0; p+k<long(s1.seqlen)-long(KMERSIZE); ++k,v>>=2u){
     if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
     if (tmpkmers[v&KMERMASK]!=ti) // kmer not in new sequence
-      otukmers[v&KMERMASK].push_back(pi|(1u<<31u));
+      otukmers[v&KMERMASK].add(pi|(1u<<31u));
     tmpkmers[v&KMERMASK]=-ti;
   }
 
@@ -3141,7 +3520,7 @@ void otuaddkmerdiff(ebasicarray<deque<uint32_t> >& otukmers,eseq& s1,eseq& s2,ei
     for (int k=0; k<32-KMERSIZE; ++k,v>>=2u){
       if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
       tmpkmers[v&KMERMASK]=-ti;
-      otukmers[v&KMERMASK].push_back(pi);
+      otukmers[v&KMERMASK].add(pi);
     }
   }
   v=pstr[p/32u]>>(2u*(p%32u));
@@ -3149,14 +3528,84 @@ void otuaddkmerdiff(ebasicarray<deque<uint32_t> >& otukmers,eseq& s1,eseq& s2,ei
   for (int k=0; p+k<long(s2.seqlen)-long(KMERSIZE); ++k,v>>=2u){
     if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
     tmpkmers[v&KMERMASK]=-ti;
-    otukmers[v&KMERMASK].push_back(pi);
+    otukmers[v&KMERMASK].add(pi);
   }
 }
 
 
 
 
-void otukmeradd(ebasicarray<deque<uint32_t> >& otukmers,int i,eseq& s,eintarray& tmpkmers,int ti,unsigned int *akmers,unsigned long akmask)
+void otukmerprotadd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkmers,int ti,unsigned int *akmers,unsigned long akmask)
+{
+  unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
+  unsigned long v;
+  long p;
+  int k;
+  for (p=0; p<s.seqlen-32; p+=32-PKMERSIZE){
+//    p=(p/3)*3;
+    v=pstr[p/32u]>>(2u*(p%32u));
+    v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+    for (int k=0; k<32-PKMERSIZE; k+=3,v>>=6u){
+//      if (akmers[v&akmask]==0x0u) continue; // only add allowed kmers 
+      if (tmpkmers[v&PKMERMASK]==ti) continue;
+      tmpkmers[v&PKMERMASK]=ti;
+//      if (otukmers[v&KMERMASK]==0x00){
+//        otukmers[v&KMERMASK]=new deque<int>();
+//        otukmers[v&KMERMASK]->reserve(1000);
+//      }
+      otukmers[v&PKMERMASK].add(i);
+    }
+  }
+//  p=(p/3)*3;
+  v=pstr[p/32u]>>(2u*(p%32u));
+  v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+  for (int k=0; p+k<long(s.seqlen)-long(PKMERSIZE); k+=3,v>>=6u){
+//    if (akmers[v&akmask]==0x0u) continue; // only add allowed kmers 
+    if (tmpkmers[v&PKMERMASK]==ti) continue;
+    tmpkmers[v&PKMERMASK]=ti;
+//    if (otukmers[v&KMERMASK]==0x00){
+//      otukmers[v&KMERMASK]=new deque<int>();
+//      otukmers[v&KMERMASK]->reserve(1000);
+//    }
+    otukmers[v&PKMERMASK].add(i);
+  }
+}
+
+void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkmers,int ti,unsigned int *akmers,unsigned long akmask,euintarray &kmermask)
+{
+  unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
+  unsigned long v;
+  long p;
+  int k;
+  for (p=0; p<s.seqlen-32; p+=32-KMERSIZE){
+    v=pstr[p/32u]>>(2u*(p%32u));
+    v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+    for (int k=0; k<32-KMERSIZE; ++k,v>>=2u){
+      if (akmers[v&akmask]==0x0u) continue; // only add allowed kmers 
+      if (kmermask[v&KMERMASK]==1 || tmpkmers[v&KMERMASK]==ti) continue;
+      tmpkmers[v&KMERMASK]=ti;
+//      if (otukmers[v&KMERMASK]==0x00){
+//        otukmers[v&KMERMASK]=new deque<int>();
+//        otukmers[v&KMERMASK]->reserve(1000);
+//      }
+      otukmers[v&KMERMASK].add(i);
+    }
+  }
+  v=pstr[p/32u]>>(2u*(p%32u));
+  v|=(pstr[p/32u+1u]<<(64u-2u*(p%32u)))&safe_shift[p%32u];
+  for (int k=0; p+k<long(s.seqlen)-long(KMERSIZE); ++k,v>>=2u){
+    if (akmers[v&akmask]==0x0u) continue; // only add allowed kmers 
+    if (kmermask[v&KMERMASK]==1 || tmpkmers[v&KMERMASK]==ti) continue;
+    tmpkmers[v&KMERMASK]=ti;
+//    if (otukmers[v&KMERMASK]==0x00){
+//      otukmers[v&KMERMASK]=new deque<int>();
+//      otukmers[v&KMERMASK]->reserve(1000);
+//    }
+    otukmers[v&KMERMASK].add(i);
+  }
+}
+
+void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkmers,int ti,unsigned int *akmers,unsigned long akmask)
 {
   unsigned long *pstr=reinterpret_cast<unsigned long*>(s.seq._str);
   unsigned long v;
@@ -3173,7 +3622,7 @@ void otukmeradd(ebasicarray<deque<uint32_t> >& otukmers,int i,eseq& s,eintarray&
 //        otukmers[v&KMERMASK]=new deque<int>();
 //        otukmers[v&KMERMASK]->reserve(1000);
 //      }
-      otukmers[v&KMERMASK].push_back(i);
+      otukmers[v&KMERMASK].add(i);
     }
   }
   v=pstr[p/32u]>>(2u*(p%32u));
@@ -3186,7 +3635,7 @@ void otukmeradd(ebasicarray<deque<uint32_t> >& otukmers,int i,eseq& s,eintarray&
 //      otukmers[v&KMERMASK]=new deque<int>();
 //      otukmers[v&KMERMASK]->reserve(1000);
 //    }
-    otukmers[v&KMERMASK].push_back(i);
+    otukmers[v&KMERMASK].add(i);
   }
 }
 
@@ -3693,6 +4142,238 @@ void seqsearchpair(const estr& id,eseqdb& db,eseq& s,eseq& s2,earray<epredinfo>&
 }
 
 
+void pseqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws)
+{
+  t1.reset();
+  pinfoarr.clear();
+//  memset(sws.bitmask,0,((db.otus.size()*2)/64+1)*sizeof(uint64_t));
+//  kmercount_both(db.otus.size(),db.otukmers,s,sws.idcount2,sws.bitmask,akmers,0x0Fu);
+//  kmercount_both2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
+//  kmercount_both_nopos2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
+  for (long segi=0; segi<s.seqlen/SEQSEGSIZE+1; ++segi){
+    epredinfo pinfo;
+    long s_start=segi*SEQSEGSIZE;
+    long s_end=(s_start+SEQSEGSIZE<s.seqlen?s_start+SEQSEGSIZE:s.seqlen);
+    long s_len=s_end-s_start;
+    eseq srev;
+    srev.setrevcompl(s,s_start,s_end);
+//    cout << "# " << str2id << " start: " << s_start << " end: " << s_end << " len: " << s_len << " seqlen: " << s.seqlen << " srev: " << srev.seqlen << endl;
+  
+//    sws.otukmerpos.init(db.otus.size()*6,0);
+    sws.idcount.init(db.otus.size()*6,0);
+
+//    cout << "# counting" << endl;
+//    kmercount_both_nopos2_skip(db.otus.size(),db.otukmers,s,s_start,s_end,sws.idcount,sws.otukmerpos,akmers,0x0Fu,s_len/100+1);
+    kmercount_both_prot_skip(db.otus.size(),db.otukmers,s,s_start,s_end,sws.idcount,sws.otukmerpos,akmers,0x0Fu,1);
+    ti=ti*0.99+t1.lap()*0.01;
+  
+    eintarray best;
+  //  ebasicarray<ealigndata> matchcounts;
+  
+    // choosing sequences for kmercounting step
+  //  eintarray& best(sws.best);
+  //  eintarray bestcount;
+  //  best.clear();
+    int l;
+    for (l=0; l<sws.idcount.size(); ++l){
+  //    uint16_t bt=(sws.bitmask[l/64u]>>(l%64u))&0x1ul;
+      if (sws.idcount[l]>0) { best.add(l); break; }
+    }
+    for (; l<sws.idcount.size(); ++l){
+  //    uint16_t bt=(sws.bitmask[l/64u]>>(l%64u))&0x1ul;
+      if (sws.idcount[l]==0 || (sws.idcount[l]<sws.idcount[best[best.size()-1]] && best.size()==3*topotus)) continue; // worst id than the bottom of the list
+  
+      int j;
+      for (j=0; j<best.size() && sws.idcount[l]<sws.idcount[best[j]]; ++j);
+  
+      if (best.size()<3*topotus)
+        best.add(l);
+      for (int tj=best.size()-1; tj>j; --tj)
+        best[tj]=best[tj-1];
+      best[j]=l;
+    }
+    if (best.size()==0) { // no overlap found to any seq group representatives
+      continue;
+//      pinfo.seqid=-2;
+//      return;
+    }
+    ts=ts*0.99+t1.lap()*0.01;
+    for (int ti=0; ti<3 && ti<best.size(); ++ti)
+      cout << ti << " " << str2id << " score: " << sws.idcount[best[ti]] << " best: "<< db.seqs.keys(best[ti]%db.otus.size()) << " " << best[ti]/db.otus.size() << endl;
+//    continue;
+
+    eintarray seqids; 
+    for (int l=0; l<best.size() && l<topotus; ++l){
+      int ibest=best[l];
+//      if ((ibest/db.otus.size())%2==0){
+  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest][0]) << "\t" << idcount[ibest] << endl;
+        for (int l2=0; l2<db.otus[ibest%db.otus.size()].size(); ++l2)
+          seqids.add(db.otus[ibest%db.otus.size()][l2]+db.seqs.size()*(ibest/db.otus.size()));
+//      }else{
+//  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest-otus.size()][0]) << "\t" << idcount[ibest] << " reversed" << endl;
+//        ibest=ibest%db.otus.size();
+//        for (int l2=0; l2<db.otus[ibest].size(); ++l2)
+//          seqids.add(db.seqs.size()+db.otus[ibest][l2]);
+//      }
+    }
+  
+ 
+//    cout << "# 2nd counting" << endl;
+    randomize(sws.rng,seqids);
+
+/*
+    sws.idcount.init(seqids.size(),0);
+  
+    if (sws.maskid+1<sws.maskid){
+      sws.maskid=-1;
+      sws.kmermask.init(KMERSIZE,-1);
+    }
+    ++sws.maskid;
+  
+    ti2=ti2*0.99+t1.lap()*0.01;
+  //  memset(sws.kmerbitmask,0,(MAXSIZE2/64+1)*sizeof(uint64_t));
+  //  setkmermask(sws.kmerbitmask,s,akmers,0xFul);
+  //  kmercount_mask(db.seqs,seqids,sws.kmerbitmask,sws.maskid,sws.idcount,akmers,0xFul);
+//    cout << "# 2nd counting -- setkmermask" << endl;
+    setkmermask(sws.kmermask,s,sws.maskid,akmers,0xFul,s_start,s_end);
+//    cout << "# 2nd counting -- kmercount_mask" << endl;
+    kmercount_mask(db.seqs,seqids,sws.kmermask,sws.maskid,sws.idcount);
+    ts2=ts2*0.99+t1.lap()*0.01;
+  
+ 
+    best.clear();
+    for (l=0; l<sws.idcount.size(); ++l){
+      if (sws.idcount[l]>0){ best.add(l); break; }
+    }
+    for (; l<sws.idcount.size(); ++l){
+  //    if (idcount[l]<idcount[best[best.size()-1]] && (idcount[l]<0.8*idcount[ibest] && best.size()>=20 || best.size()==100)) continue; // worse id than the bottom of the list
+      if (sws.idcount[l]==0 || (sws.idcount[l]<sws.idcount[best[best.size()-1]] && best.size()>=tophits)) continue; // zero counts or worse id than the bottom of the list
+  
+      int j;
+      for (j=0; j<best.size() && sws.idcount[l]<sws.idcount[best[j]]; ++j);
+  
+  //    if (best.size()<20 || idcount[l]<0.8*idcount[ibest] && best.size()<100)
+      if (best.size()<tophits)
+        best.add(l);
+      for (int tj=best.size()-1; tj>j; --tj)
+        best[tj]=best[tj-1];
+      best[j]=l;
+    }
+    if (best.size()==0){
+//      pinfo.seqid=-2;
+//      return;  // no hits in db found, skip query
+      continue;
+    }
+  
+    if (sws.offset+s_len<sws.offset){
+      sws.offset=0;
+      sws.kmerpos.init(PMAXSIZE,-1);
+      sws.kmerposrev.init(PMAXSIZE,-1);
+    }
+//    cout << "# 2nd counting -- setkmerpos" << endl;
+//    cout << "# 2nd counting -- setkmerposrev" << endl;
+
+//    for (int l=0; l<6; ++l)
+//    setpkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
+
+
+  
+  //  eintarray seqboth;
+  //  seqboth.init(db.seqs.size(),-1);
+//    cout << "# aligning" << endl;
+*/
+  
+    for (int l=0; l<seqids.size(); ++l){
+      int sbest=seqids[l]%db.seqs.size();
+      eseq &sdb(db.seqs.values(sbest));
+      if (sws.offset2+(unsigned int)(db.seqs.values(sbest).seqlen)<sws.offset2){
+        sws.offset2=1u;
+        sws.kmerpos2.init(PMAXSIZE,0);
+      }
+      setpkmerpos(sws.kmerpos2,sdb,sws.offset2);
+  
+      ealigndata adata;
+      adata.seqid=sbest;
+      adata.revcompl=(seqids[l]/db.seqs.size()%2==1);
+//      adata.kmercount=sws.idcount[best[l]];
+      
+//      cout << "s_start: " << s_start << " " << s_start+seqids[l]/db.seqs.size()/2 << endl;
+      if ((seqids[l]/db.seqs.size())%2==0){
+        cout << "# forward align: " << db.seqs.keys(sbest) << " slen: " << sdb.seqlen << endl;
+        pseqident_local(s,sws.kmerpos,sdb,adata,sws,pas,s_start+seqids[l]/db.seqs.size()/2,s_end);
+  //      seqident_global(s,sws.kmerpos,sdb,adata,sws,as);
+  //      seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+  /*
+        seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+        seqident_local(s,sws.kmerpos,sdb,adata2,sws,as);
+  
+        cout << str2id << endl;
+        cout << "# " << " M:"<<adata.matches << " X:" << adata.mismatches << " G:"<<adata.gaps << " S:"<< adata._score << " "<< adata.profile << endl;
+        if (!(adata==adata2))
+          cout << "#!" << " M:"<<adata2.matches << " X:" << adata2.mismatches << " G:"<<adata2.gaps << " S:"<<adata2._score << " K:" << adata2.kmercount << " " << adata2.profile << endl;
+  */
+      }else{
+        cout << "# reverse align: " << db.seqs.keys(sbest) << " slen: " << sdb.seqlen << endl;
+//        pseqident_local(srev,sws.kmerposrev,sdb,adata,sws,as,s_start+seqids[l]/db.seqs.size()/2,s_end);
+        int fs=(s_end - seqids[l]/db.seqs.size()/2)%3;
+        pseqident_local(srev,sws.kmerposrev,sdb,adata,sws,pas,fs,srev.seqlen);
+        // flip 
+        int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
+        adata.revcompl=true;
+  //      seqident_global(srev,sws.kmerposrev,sdb,adata,sws,as);
+  //      seqcalign_global_noedgegap(srev,0,srev.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+  /*
+        seqcalign_global_noedgegap(srev,0,srev.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+        seqident_local(srev,sws.kmerposrev,sdb,adata2,sws,as);
+  
+        cout << str2id << endl;
+        cout << "# " << " M:"<<adata.matches << " X:" << adata.mismatches << " G:"<<adata.gaps << " S:" <<adata._score << " " << adata.profile << endl;
+        if (!(adata==adata2))
+          cout << "#!" << " M:"<<adata2.matches << " X:" << adata2.mismatches << " G:"<<adata2.gaps << " S:" << adata2._score << " K:" << adata2.kmercount << " " << adata2.profile << endl;
+  */
+  
+      }
+  //    LDEBUG(D_SEQALIGNMENT,print_tncount(&tncounts[l*NCOUNT_MAXLEN],0,s.seqlen));
+      if (adata.matches+adata.mismatches>0 && adata.score()>=20){
+        pinfo.matchcounts.add(adata);
+//        adata.profile.inv();
+//        cout << "l: " << l << endl << adata.palign_str(s,db.seqs.values(seqids[l]%db.seqs.size())) << endl;
+      }
+  
+      sws.offset2+=sdb.seqlen;
+    }
+    sws.offset+=s_len;
+  
+    if (pinfo.matchcounts.size()>0){
+      heapsort(pinfo.matchcounts);
+    //  for (int i=0; i<pinfo.matchcounts.size(); ++i)
+    //    cout << "#best: " << i << " " << seqs.keys(pinfo.matchcounts[i].seqid) << " " << pinfo.matchcounts[i].score() << endl;
+      pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
+      pinfo.seqid=pinfo.tophit.seqid;
+      pinfoarr.add(pinfo);
+    }
+  }
+  ta=ta*0.99+t1.lap()*0.01;
+}
+
+void findtaxcutoff(efloatarray& taxcutoff,epredinfo& pinfo2,earrayof<double,int>& predtax,etax& tax)
+{
+  ealigndata refhit=pinfo2.matchcounts[pinfo2.matchcounts.size()-1];
+//      cout << "# ref: " << str2id << "\t" << seqs.keys(refhit.seqid) << "\t" << refhit.score() << endl;
+  for (int l=pinfo2.matchcounts.size()-1; l>=0; --l){
+    int sbest=pinfo2.matchcounts[l].seqid;
+    if (tax.seqs[sbest]==0x00) continue;
+    eseqtax &taxhit(*tax.seqs[sbest]);
+    for (int k=0; k<taxhit.tl.size(); ++k){
+      if (taxhit.tl[k].tid!=predtax.keys(k) && taxcutoff[k]==0.0) taxcutoff[k]=pinfo2.matchcounts[l].identity();
+    }
+  }
+  // if computed thresholds are lower than what was predicted for the silver hit, then increase them to silver hit values
+//        for (int k=0; k<tmptaxhit.tl.size(); ++k){
+//          if (taxcutoff[k]>tmptaxhit.tl[k].ncf && tmptaxhit.tl[k].ncf>0.0) taxcutoff[k]=tmptaxhit.tl[k].ncf;
+//        }
+}
+
 
 void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws)
 {
@@ -3767,22 +4448,22 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
           seqids.add(db.seqs.size()+db.otus[ibest][l2]);
       }
     }
+
+    eintarray otureps;
   
     // add representatives from all non-chosen OTUS (may improve confidence and novel otu estimation)
-  /*
-    for (int l=topotus; l<best.size(); ++l){
+    for (int l=topotus; l<topotus+3 && l<best.size(); ++l){
       int ibest=best[l];
       if (ibest<db.otus.size()){
-        if (db.otus[ibest].size()==0 || sws.idcount[ibest]==0) continue;
-        seqids.add(db.otus[ibest][0]);
+        if (db.otus[ibest].size()==0) continue;
+        otureps.add(db.otus[ibest][0]);
       } else {
   //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest-otus.size()][0]) << "\t" << idcount[ibest] << " reversed" << endl;
         ibest-=db.otus.size();
-        if (db.otus[ibest].size()==0 || sws.idcount[ibest]==0) continue;
-        seqids.add(db.seqs.size()+db.otus[ibest][0]);
+        if (db.otus[ibest].size()==0) continue;
+        otureps.add(db.seqs.size()+db.otus[ibest][0]);
       }
     }
-  */
   
 //    cout << "# 2nd counting" << endl;
 
@@ -3859,6 +4540,12 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
     setkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
 //    cout << "# 2nd counting -- setkmerposrev" << endl;
     setkmerpos(sws.kmerposrev,srev,sws.offset);
+
+    for (int i=0; i<otureps.size(); ++i){
+      best.add(seqids.size());
+      seqids.add(otureps[i]);
+    }
+//    best+=otureps;
    
   /*
     // add last added seqs (worst kmercounts) to improve confidence estimation by keeping lower scoring seqs for full alignment
@@ -3948,38 +4635,20 @@ void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr
   ta=ta*0.99+t1.lap()*0.01;
 }
 
-void findtaxcutoff(efloatarray& taxcutoff,epredinfo& pinfo2,earrayof<double,int>& predtax,etax& tax)
-{
-  ealigndata refhit=pinfo2.matchcounts[pinfo2.matchcounts.size()-1];
-//      cout << "# ref: " << str2id << "\t" << seqs.keys(refhit.seqid) << "\t" << refhit.score() << endl;
-  for (int l=pinfo2.matchcounts.size()-1; l>=0; --l){
-    int sbest=pinfo2.matchcounts[l].seqid;
-    if (tax.seqs[sbest]==0x00) continue;
-    eseqtax &taxhit(*tax.seqs[sbest]);
-    for (int k=0; k<taxhit.tl.size(); ++k){
-      if (taxhit.tl[k].tid!=predtax.keys(k) && taxcutoff[k]==0.0) taxcutoff[k]=pinfo2.matchcounts[l].identity();
-    }
-  }
-  // if computed thresholds are lower than what was predicted for the silver hit, then increase them to silver hit values
-//        for (int k=0; k<tmptaxhit.tl.size(); ++k){
-//          if (taxcutoff[k]>tmptaxhit.tl[k].ncf && tmptaxhit.tl[k].ncf>0.0) taxcutoff[k]=tmptaxhit.tl[k].ncf;
-//        }
-}
-
 void calcConfidence(earrayof<double,int>& ptax,efloatarray &mcfarr,const ealigndata& adata,const epredinfo& pinfo,const etax& tax)
 {
-  float bid=pinfo.tophit.identity();
+  float bid=adata.identity();
   if (tax.seqs[pinfo.tophit.seqid]!=0x00){
     eseqtax &tmptaxhit(*tax.seqs[adata.seqid]);
     // adjust id to closest gold hit
     if (tmptaxhit.bid>0.0) {
       bid=bid*tmptaxhit.bid;
       for (int l=0; l<ptax.size(); ++l)
-        ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
+//        ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
+        ptax.values(l)=MIN(ptax.values(l),tmptaxhit.tl[l].cf);
     }
   }
 
-  mcfarr.init(ptax.size());
   float lastmcf=0.0;
   //  adjust computed confidences
   for (int l=MIN(ptax.size(),tax.names.size())-1; l>=0; --l){
@@ -3997,22 +4666,40 @@ void calcConfidence(earrayof<double,int>& ptax,efloatarray &mcfarr,const ealignd
   }
 }
 
-void taxScore(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,epredinfo& pinfo,edoublearray& taxscores,etax& tax)
+void taxScore(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,epredinfo& pinfo,edoublearray& taxscores,etax& tax,int slen)
 {
   ptax.clear();
+//  while (ptax.size()<tax.names.size())
+//    ptax.add(-1,0.0);
   for (int i=0; i<tax.names.size(); ++i)
     ptax.add(-1,0.0);
 
+
+//  float sw=sweightabs; //MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+//  float sw=MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+  float sw=MAX(0.05,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+
+  mcfarr.init(ptax.size(),0.0);
+  if(tax.seqs[adata.seqid]==0x00)
+    return;
+
+//  ldieif(tax.seqs[adata.seqid]==0x00,"Missing taxonomy for sequence");
+  float cfw;
   eseqtax &seqtax(*tax.seqs[adata.seqid]);
   for (int l=0; l<seqtax.tl.size(); ++l){
-    ldieif(seqtax.tl[l].tid>=tax.names[l].size(),estr("key out of tax: ")+adata.seqid+" "+estr(l)+" "+seqtax.tl[l].tid+" "+tax.names[l].size());
+    ldieif(seqtax.tl[l].tid>=long(tax.names[l].size()),estr("key out of tax: ")+adata.seqid+" "+estr(l)+" "+seqtax.tl[l].tid+" "+tax.names[l].size());
+    cfw=1.0;
+    if (seqtax.bid>0.0)
+      cfw=0.5*seqtax.tl[l].cf+0.5;
     ptax.keys(l)=seqtax.tl[l].tid;
-    ptax.values(l)=exp((1.0l-pinfo.tophit.score()/adata.score())*sweight)/taxscores[l];
+//    ptax.values(l)=exp((1.0l-pinfo.tophit.score()/adata.score())*sweight)*cfw/taxscores[l];
+//    ptax.values(l)=exp((adata.score()-pinfo.tophit.score())*sweightabs)*cfw/taxscores[l];
+    ptax.values(l)=exp((adata.score()-pinfo.tophit.score())*sw)*cfw/taxscores[l];
   }
   calcConfidence(ptax,mcfarr,adata,pinfo,tax);
 }
 
-void taxScoreSum(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts)
+void taxScoreSum(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts,int slen)
 {
   taxscores.init(tax.names.size(),0.0);
   int tophitl=-1;
@@ -4030,29 +4717,45 @@ void taxScoreSum(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<
   double topscore=tophit.score();
 
   int taxid=0;
-  taxcounts.init(tax.names.size());
-  for (int i=0; i<taxcounts.size(); ++i)
-    taxcounts[i].init(tax.names[i].size(),-1);
+  ebasicarray<efloatarray> taxmaxscores;
+  taxmaxscores.init(tax.names.size());
+  for (int i=0; i<taxmaxscores.size(); ++i)
+    taxmaxscores[i].init(tax.names[i].size(),0.0);
+//  taxcounts.init(tax.names.size());
+//  for (int i=0; i<taxcounts.size(); ++i)
+//    taxcounts[i].init(tax.names[i].size(),-1);
+
+//  float sw=MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+  float sw=MAX(0.05,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+//  float sw=sweightabs; // MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+
   for (int l=pinfo.matchcounts.size()-1; l>=0; --l){
     int sbest=pinfo.matchcounts[l].seqid;
     if (tax.seqs[sbest]==0x00) continue;
 //    if (pinfo.matchcounts[l].score()<=0.0) break; // do not use alignments with less than or zero score
     eseqtax &taxhit(*tax.seqs[sbest]);
+
+    float cfw,w;
     for (int k=0; k<taxhit.tl.size(); ++k){
-      if (taxcounts[k][taxhit.tl[k].tid]==taxid) continue;
-      taxcounts[k][taxhit.tl[k].tid]=taxid;
-      taxscores[k]+=exp((1.0l-topscore/pinfo.matchcounts[l].score())*sweight);
+//      if (taxcounts[k][taxhit.tl[k].tid]==taxid) continue;
+      if (taxhit.tl[k].tid==-1) continue;
+      cfw=1.0;
+      if (taxhit.bid>0.0)
+        cfw=0.5*taxhit.tl[k].cf+0.5;
+//      taxcounts[k][taxhit.tl[k].tid]=taxid;
+//      w=exp((1.0l-topscore/pinfo.matchcounts[l].score())*sweight)*cfw;
+//      w=exp((pinfo.matchcounts[l].score()-topscore)*sweightabs)*cfw;
+      w=exp((pinfo.matchcounts[l].score()-topscore)*sw)*cfw;
+      if (w>taxmaxscores[k][taxhit.tl[k].tid]){
+//        cout << "l: " << l << " k: " << k << " w: " << w << " score: " << pinfo.matchcounts[l].score() << " topscore: " << topscore << endl;
+        taxscores[k]+=w-taxmaxscores[k][taxhit.tl[k].tid];
+        taxmaxscores[k][taxhit.tl[k].tid]=w;
+      }
 //      taxscores[k]+=exp(log(pinfo.matchcounts[l].identity()*100.0)*30.0);
     }
-/*
-      if (seqids[best[imc[l]]]<seqs.size())
-        cout << str2id << "\t" << seqs.keys(sbest) << "\t" << matchcounts[imc[l]] << "\t" << s.seqlen << endl;
-      else
-        cout << str2id << "\t" << seqs.keys(sbest) << "\t" << matchcounts[imc[l]] << "\t" << s.seqlen << "\treversed" << endl;
-*/
   }
-
-  
+//  for (int i=0; i<taxscores.size(); ++i)
+//    cout << " i: " << i << " maxscore: " << taxscores[i] << endl;
 }
 
 void taxscore2(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts)
@@ -4084,7 +4787,7 @@ void taxscore2(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray
 //    if (pinfo.matchcounts[l].score()<=0.0) break; // do not use alignments with less than or zero score
     eseqtax &taxhit(*tax.seqs[sbest]);
     for (int k=0; k<taxhit.tl.size(); ++k){
-      if (taxcounts[k][taxhit.tl[k].tid]==taxid) continue;
+      if (taxhit.tl[k].tid==-1 || taxcounts[k][taxhit.tl[k].tid]==taxid) continue;
       taxcounts[k][taxhit.tl[k].tid]=taxid;
 //      taxscores[k]+=exp(log(pinfo.matchcounts[l].score())*30.0);
       taxscores[k]+=exp(log(pinfo.matchcounts[l].identity()*100.0)*30.0);
@@ -4099,7 +4802,7 @@ void taxscore2(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray
 
   
   for (int l=0; l<toptax.tl.size(); ++l){
-    ldieif(toptax.tl[l].tid>=tax.names[l].size(),estr("key out of tax: ")+tophit.seqid+" "+estr(l)+" "+toptax.tl[l].tid+" "+tax.names[l].size());
+    ldieif(toptax.tl[l].tid>=long(tax.names[l].size()),estr("key out of tax: ")+tophit.seqid+" "+estr(l)+" "+toptax.tl[l].tid+" "+tax.names[l].size());
     ptax.keys(l)=toptax.tl[l].tid;
     ptax.values(l)=exp(log(tophit.identity()*100.0l)*30.0l)/taxscores[l];
 //    cout << "# i: " << tophit.identity() << " exp: " << exp(log(tophit.identity()*100.0l)*30.0l) << " sum: " << taxscores[l] << " = " << pinfo.predtax2.values(l) << endl;
@@ -4201,11 +4904,15 @@ void load_taxa(const estr& taxfile,eseqdb& db)
             tax.names.add(earray<estr>());
             tax.ind.add(estrhashof<int>());
           }
-          if (!tax.ind[i].exists(parts2[i])){
-            tax.ind[i].add(parts2[i],tax.names[i].size());
-            tax.names[i].add(parts2[i]);
+          if (parts2[i].len()==0)
+            newtax->tl.add(eseqtaxlevel(-1));
+          else {
+            if (!tax.ind[i].exists(parts2[i])){
+              tax.ind[i].add(parts2[i],tax.names[i].size());
+              tax.names[i].add(parts2[i]);
+            }
+            newtax->tl.add(eseqtaxlevel(tax.ind[i][parts2[i]]));
           }
-          newtax->tl.add(eseqtaxlevel(tax.ind[i][parts2[i]]));
         }
         tax.seqs[db.seqind[parts[0]]]=newtax;
       }else if (parts.size()>11) { // indirect taxonomy file with confidences
@@ -4255,6 +4962,15 @@ struct emtdata {
   econdsig sbufferSignal;
   eseqdb *seqdb;
 //  ebasicarray<etax> *taxa;
+
+  int ipos;
+  int ilen;
+  int threadi;
+  int dbotus;
+  euintarray otukmersize;
+  eintarray mapped;
+  eintarray len_si;
+  
   bool finished;
   bool print_align;
   bool print_hits;
@@ -4265,7 +4981,6 @@ class epredtax
  public:
   earrayof<double,int> tax;
   efloatarray cutoff;
-  
 };
 
 estr tax2str(emtdata& mtdata,long seqid)
@@ -4277,7 +4992,7 @@ estr tax2str(emtdata& mtdata,long seqid)
       tmpstr+="-";
     else
       for (int l=0; l<tax.seqs[seqid]->tl.size(); ++l)
-        tmpstr+=estr(";")+(tax.seqs[seqid]->tl[l].tid==-1?estr("NA"):tax.names[l].at(tax.seqs[seqid]->tl[l].tid));
+        tmpstr+=estr(";")+(tax.seqs[seqid]->tl[l].tid==-1?estr("N/A"):tax.names[l].at(tax.seqs[seqid]->tl[l].tid));
     tmpstr+="\t";
   }
   tmpstr.del(0,1);
@@ -4305,7 +5020,7 @@ estr outfmt_confidences(const etax& tax,const earrayof<double,int>& ptax,const e
 {
   estr res;
   for (int l=0; l<ptax.size() && l<tax.names.size(); ++l)
-    res+=(ptax.keys(l)==-1?estr("NA"):tax.names[l].at(ptax.keys(l)))+"\t"+mcfarr[l]+"\t"+ptax.values(l)+"\t";
+    res+=(ptax.keys(l)==-1?estr("N/A"):tax.names[l].at(ptax.keys(l)))+"\t"+mcfarr[l]+"\t"+ptax.values(l)+"\t";
   res.del(-1);
   return(res);
 }
@@ -4639,8 +5354,9 @@ void taskSearchPaired()
           double topscore=pinfo.tophit.score();
           double tscore=0.0;
           for (int t=0; t<pinfo.matchcounts.size(); ++t)
+//            tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
             tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
-           outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+          outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
         }
 
         for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
@@ -4649,8 +5365,8 @@ void taskSearchPaired()
           earrayof<double,int> ptax;
           edoublearray taxscores;
           efloatarray mcfarr;
-          taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts);
-          taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax);
+          taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts,s.seqlen);
+          taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax,s.seqlen);
       
           outstr+="\t";
           outstr+=outfmt.value()(tax,ptax,mcfarr);
@@ -4747,79 +5463,95 @@ void taskSearch()
       seqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
       if (pinfoarr.size()==0) continue;
 //      if (pinfo.tophit.seqid<0) continue;
+
+      epredinfo *topinfo=&pinfoarr[0];
+      for (int pi=1; pi<pinfoarr.size(); ++pi){
+        if (pinfoarr[pi].tophit.score()>topinfo->tophit.score()) topinfo=&pinfoarr[pi];
+      }
   
-      for (int pi=0; pi<pinfoarr.size(); ++pi){
-        epredinfo& pinfo(pinfoarr[pi]);
-        float taxcutoffmin=pinfo.matchcounts[0].identity();
-        float bid=pinfo.tophit.identity();
-        if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
-          eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
-          // adjust id to closest gold hit
-  //        if (tmptaxhit.bid>0.0) bid=tmptaxhit.bid*bid;
-          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
-        }
+      epredinfo& pinfo(*topinfo);
+      float taxcutoffmin=pinfo.matchcounts[0].identity();
+      float bid=pinfo.tophit.identity();
+      if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+        eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
+        // adjust id to closest gold hit
+//        if (tmptaxhit.bid>0.0) bid=tmptaxhit.bid*bid;
+        if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+      }
       
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
   
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
-        outstr+=pbuf->keys(i)+(mtdata.print_hits?"\t0":"")+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
-       
-        if (mtdata.seqdb->taxa.size()==0){
-          double topscore=pinfo.tophit.score();
-          double tscore=0.0;
-          for (int t=0; t<pinfo.matchcounts.size(); ++t)
-            tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
-           outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
-        }
+      outstr+=pbuf->keys(i)+(mtdata.print_hits?"\t0":"")+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+     
+      if (mtdata.seqdb->taxa.size()==0){
+        double topscore=pinfo.tophit.score();
+        double tscore=0.0;
+        for (int t=0; t<pinfo.matchcounts.size(); ++t)
+//          tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
+          tscore+=exp((pinfo.matchcounts[t].score()-topscore)*sweightabs);
+        outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+      }
 
-        earray<edoublearray> taxscores;
-        taxscores.init(mtdata.seqdb->taxa.size());
-        for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
-          etax& tax(mtdata.seqdb->taxa.at(t));
-      
-          efloatarray mcfarr;
-          earrayof<double,int> ptax;
-          taxScoreSum(taxscores[t],pinfo,tax,searchws.taxcounts);
-          taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax);
+      earray<edoublearray> taxscores;
+      taxscores.init(mtdata.seqdb->taxa.size());
+      for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+        etax& tax(mtdata.seqdb->taxa.at(t));
+    
+        efloatarray mcfarr;
+        earrayof<double,int> ptax;
+        efloatarray tmpmcfarr;
+        earrayof<double,int> tmptax;
+        taxScoreSum(taxscores[t],pinfo,tax,searchws.taxcounts,s.seqlen);
 
-          outstr+="\t";
-          outstr+=outfmt.value()(tax,ptax,mcfarr);
-          outstr+="\t";
-        }
-        outstr+="\n";
-        if (mtdata.print_hits){
-          etax& tax(mtdata.seqdb->taxa.at(0));
-          for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
-            ealigndata& adata(pinfo.matchcounts[l]);
-  //          outstr+="# "+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+adata.s2+"\t"+adata.e2+"\t"+tax2str(mtdata,adata.seqid)+"\n";
-//            outstr+=estr(l)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.kmercount+"\n";
-            outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
-            for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
-              etax& tax(mtdata.seqdb->taxa.at(t));
-          
-              efloatarray mcfarr;
-              earrayof<double,int> ptax;
-              taxScore(ptax,mcfarr,adata,pinfo,taxscores[t],tax);
-              outstr+="\t";
-              outstr+=outfmt.value()(tax,ptax,mcfarr);
-              outstr+="\t";
+        taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax,s.seqlen);
+        for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
+          ealigndata& adata(pinfo.matchcounts[l]);
+          taxScore(tmptax,tmpmcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+          for (int tl=0; tl<tmptax.size(); ++tl){
+            if (tmptax.values(tl)>ptax.values(tl)){
+              ptax=tmptax; 
+              mcfarr=tmpmcfarr;
             }
-            outstr+="\n";
           }
         }
-  //      outstr+=pinfo.tophit.profile.str() + "\n";
-        if (mtdata.print_align){
-          pinfo.tophit.profile.inv();
-          outstr+=pinfo.tophit.profile.str() + "\n";
-          estr salistr=pinfo.tophit.compress(s);
-          outstr+=salistr+ "\n";
-          outstr+=sali_decompress(salistr,mtdata.seqdb->seqs.values(pinfo.tophit.seqid))+"\n";
-          outstr+=pinfo.tophit.align_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
+
+        outstr+="\t";
+        outstr+=outfmt.value()(tax,ptax,mcfarr);
+        outstr+="\t";
+      }
+      outstr+="\n";
+      if (mtdata.print_hits){
+        etax& tax(mtdata.seqdb->taxa.at(0));
+        for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
+          ealigndata& adata(pinfo.matchcounts[l]);
+          outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
+          for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+            etax& tax(mtdata.seqdb->taxa.at(t));
+        
+            efloatarray mcfarr;
+            earrayof<double,int> ptax;
+            taxScore(ptax,mcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+            outstr+="\t";
+            outstr+=outfmt.value()(tax,ptax,mcfarr);
+            outstr+="\t";
+          }
           outstr+="\n";
         }
-        mtdata.m.lock();
-        cout << outstr; outstr.clear();
-        mtdata.m.unlock();
+      }
+//      outstr+=pinfo.tophit.profile.str() + "\n";
+      if (mtdata.print_align){
+        pinfo.tophit.profile.inv();
+        outstr+=pinfo.tophit.profile.str() + "\n";
+        estr salistr=pinfo.tophit.compress(s);
+        outstr+=salistr+ "\n";
+        outstr+=sali_decompress(salistr,mtdata.seqdb->seqs.values(pinfo.tophit.seqid))+"\n";
+        outstr+=pinfo.tophit.align_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
+        outstr+="\n";
+      }
+      mtdata.m.lock();
+      cout << outstr; outstr.clear();
+      mtdata.m.unlock();
 
 //      if (pinfo.tophit.pair)
 //        outstr+=estr("#pair: ")+pinfo.tophit.pair->score()+"\t"+pinfo.tophit.pair->identity()+"\t"+pinfo.tophit.pair->matches+"\t"+pinfo.tophit.pair->mismatches+"\t"+pinfo.tophit.pair->gaps+"\t"+pinfo.tophit.pair->s2+"\t"+pinfo.tophit.pair->e2+"\n";
@@ -4840,6 +5572,299 @@ void taskSearch()
         outstr+="\n";
       }
 */
+    }
+
+    mtdata.m.lock();
+    cout << outstr;
+    mtdata.sbuffer.add(pbuf);
+    mtdata.sbufferSignal.signal();
+    mtdata.m.unlock();
+  }
+  delete searchws.bitmask;
+}
+
+void taskProtSearch()
+{
+  estr outstr;
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(mtdata.seqdb->otus.size()*2)/64+1];
+  searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.kmerpos.init(MAXSIZE,0u);
+  searchws.kmerpos2.init(PMAXSIZE,0u);
+  searchws.kmerposrev.init(MAXSIZE,0u);
+  searchws.offset=1u;
+  searchws.offset2=1u;
+  searchws.kmermask.init(MAXSIZE,0u);
+  searchws.maskid=1u;
+  while(1){
+    mtdata.m.lock();
+    while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.seqs.size()==0 && mtdata.finished) {mtdata.m.unlock(); return;}
+
+    estrarrayof<eseq> *pbuf=mtdata.seqs[0];
+    mtdata.seqs.erase(0);
+    mtdata.m.unlock();
+    outstr.clear();
+
+    for (int i=0; i<pbuf->size(); ++i){
+      eseq& s(pbuf->values(i));
+      earray<epredinfo> pinfoarr;
+  //    ebasicarray<ealigndata> matchcounts;
+      pseqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      if (pinfoarr.size()==0) continue;
+//      if (pinfo.tophit.seqid<0) continue;
+
+      epredinfo *topinfo=&pinfoarr[0];
+      for (int pi=1; pi<pinfoarr.size(); ++pi){
+        if (pinfoarr[pi].tophit.score()>topinfo->tophit.score()) topinfo=&pinfoarr[pi];
+      }
+  
+      epredinfo& pinfo(*topinfo);
+      float taxcutoffmin=pinfo.matchcounts[0].identity();
+      float bid=pinfo.tophit.identity();
+      if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+        eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
+        // adjust id to closest gold hit
+//        if (tmptaxhit.bid>0.0) bid=tmptaxhit.bid*bid;
+        if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+      }
+      
+//        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
+  
+//        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
+      outstr+=pbuf->keys(i)+(mtdata.print_hits?"\t0":"")+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+     
+      if (mtdata.seqdb->taxa.size()==0){
+        double topscore=pinfo.tophit.score();
+        double tscore=0.0;
+        for (int t=0; t<pinfo.matchcounts.size(); ++t)
+//          tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
+          tscore+=exp((pinfo.matchcounts[t].score()-topscore)*sweightabs);
+        outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+      }
+
+      earray<edoublearray> taxscores;
+      taxscores.init(mtdata.seqdb->taxa.size());
+      for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+        etax& tax(mtdata.seqdb->taxa.at(t));
+    
+        efloatarray mcfarr;
+        earrayof<double,int> ptax;
+        efloatarray tmpmcfarr;
+        earrayof<double,int> tmptax;
+        taxScoreSum(taxscores[t],pinfo,tax,searchws.taxcounts,s.seqlen);
+
+        taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax,s.seqlen);
+        for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
+          ealigndata& adata(pinfo.matchcounts[l]);
+          taxScore(tmptax,tmpmcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+          for (int tl=0; tl<tmptax.size(); ++tl){
+            if (tmptax.values(tl)>ptax.values(tl)){
+              ptax=tmptax; 
+              mcfarr=tmpmcfarr;
+            }
+          }
+        }
+
+        outstr+="\t";
+        outstr+=outfmt.value()(tax,ptax,mcfarr);
+        outstr+="\t";
+      }
+      outstr+="\n";
+      if (mtdata.print_hits){
+        etax& tax(mtdata.seqdb->taxa.at(0));
+        for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
+          ealigndata& adata(pinfo.matchcounts[l]);
+          outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
+          for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+            etax& tax(mtdata.seqdb->taxa.at(t));
+        
+            efloatarray mcfarr;
+            earrayof<double,int> ptax;
+            taxScore(ptax,mcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+            outstr+="\t";
+            outstr+=outfmt.value()(tax,ptax,mcfarr);
+            outstr+="\t";
+          }
+          outstr+="\n";
+        }
+      }
+//      outstr+=pinfo.tophit.profile.str() + "\n";
+      if (mtdata.print_align){
+        pinfo.tophit.profile.inv();
+        outstr+=pinfo.tophit.profile.str() + "\n";
+        outstr+=pinfo.tophit.palign_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
+        outstr+="\n";
+      }
+      mtdata.m.lock();
+      cout << outstr; outstr.clear();
+      mtdata.m.unlock();
+
+//      if (pinfo.tophit.pair)
+//        outstr+=estr("#pair: ")+pinfo.tophit.pair->score()+"\t"+pinfo.tophit.pair->identity()+"\t"+pinfo.tophit.pair->matches+"\t"+pinfo.tophit.pair->mismatches+"\t"+pinfo.tophit.pair->gaps+"\t"+pinfo.tophit.pair->s2+"\t"+pinfo.tophit.pair->e2+"\n";
+//      outstr+="# "+pinfo.tophit.profile.str()+"\n";
+
+/*
+      for (int j=pinfo.matchcounts.size()-1; j>=0 && j>=pinfo.matchcounts.size()-10; --j){
+        ealigndata &ad(pinfo.matchcounts[j]);
+        outstr+="# "+mtdata.seqdb->seqs.keys(ad.seqid)+" "+ad.identity()+" "+ad.score()+" ";
+        ldieif(mtdata.seqdb->taxa.size()==0,"no taxa");
+        ldieif(ad.seqid>mtdata.seqdb->taxa[0].seqs.size(),"seqid larger than taxa: "+estr(ad.seqid)+" > "+mtdata.seqdb->taxa[0].seqs.size());
+        if (mtdata.seqdb->taxa[0].seqs[ad.seqid]==0x00) outstr+="-";
+        else{ 
+          eseqtax& st(*mtdata.seqdb->taxa[0].seqs[ad.seqid]);
+          for (int k=0; k<st.tl.size(); ++k)
+            outstr+=";"+mtdata.seqdb->taxa[0].names[k][st.tl[k].tid];
+        }
+        outstr+="\n";
+      }
+*/
+    }
+
+    mtdata.m.lock();
+    cout << outstr;
+    mtdata.sbuffer.add(pbuf);
+    mtdata.sbufferSignal.signal();
+    mtdata.m.unlock();
+  }
+  delete searchws.bitmask;
+}
+
+
+/*
+
+void taskProtsearch()
+{
+  estr outstr;
+  esearchws searchws;
+//  searchws.seqkmers.init(MAXSIZE,-1);
+//  searchws.revseqkmers.init(MAXSIZE,-1);
+  searchws.kmerbitmask=new uint64_t[MAXSIZE/64+1];
+  searchws.bitmask=new uint64_t[(mtdata.seqdb->otus.size()*2)/64+1];
+  searchws.otukmerpos.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.idcount2.init(mtdata.seqdb->otus.size()*2,0);
+  searchws.kmerpos2.reserve(MAXSIZE);
+  searchws.kmerpos.init(MAXSIZE,-1);
+  searchws.kmerposrev.init(MAXSIZE,-1);
+  searchws.offset=0;
+  searchws.kmerpos2.init(PMAXSIZE,-1);
+  searchws.offset2=0;
+  searchws.kmermask.init(MAXSIZE,-1);
+  searchws.maskid=-1;
+  while(1){
+    mtdata.m.lock();
+    while (mtdata.seqs.size()==0 && !mtdata.finished) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.seqs.size()==0 && mtdata.finished) {mtdata.m.unlock(); return;}
+
+    estrarrayof<eseq> *pbuf=mtdata.seqs[0];
+    mtdata.seqs.erase(0);
+    mtdata.m.unlock();
+    outstr.clear();
+
+    for (int i=0; i<pbuf->size(); ++i){
+      eseq& s(pbuf->values(i));
+      earray<epredinfo> pinfoarr;
+  //    ebasicarray<ealigndata> matchcounts;
+      pseqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      if (pinfoarr.size()==0) continue;
+//      if (pinfo.tophit.seqid<0) continue;
+  
+      for (int pi=0; pi<pinfoarr.size(); ++pi){
+        epredinfo& pinfo(pinfoarr[pi]);
+        float taxcutoffmin=pinfo.matchcounts[0].identity();
+        float bid=pinfo.tophit.identity();
+        if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+          eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
+          // adjust id to closest gold hit
+  //        if (tmptaxhit.bid>0.0) bid=tmptaxhit.bid*bid;
+          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+        }
+      
+//        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
+  
+        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
+        for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+          etax& tax(mtdata.seqdb->taxa.at(t));
+      
+          earrayof<double,int> ptax;
+          taxscore(ptax,pinfo,tax,searchws.taxcounts);
+      
+          bid=pinfo.tophit.identity();
+          if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]!=0x00){
+            eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]);
+            // adjust id to closest gold hit
+  //          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+  //          if (tmptaxhit.bid>0.0) bid=0.5*(bid<tmptaxhit.bid?bid:tmptaxhit.bid)+0.5*bid*tmptaxhit.bid; 
+            if (tmptaxhit.bid>0.0) {
+              bid=bid*tmptaxhit.bid;
+              for (int l=0; l<ptax.size(); ++l)
+                ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
+  //            if (ptax.values(l)>tmptaxhit.tl[l].cf) ptax.values(l)=tmptaxhit.tl[l].cf;
+  //          ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
+            }
+          }
+  
+          efloatarray mcfarr;
+          mcfarr.init(ptax.size());
+          float lastmcf=0.0;
+          //  adjust computed confidences
+          for (int l=MIN(ptax.size(),tax.names.size())-1; l>=0; --l){
+            ldieif(ptax.keys(l)!=-1 && ptax.keys(l)>=tax.names[l].size(),"key out of tax: "+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+" "+estr(l)+" "+ptax.keys(l)+" "+tax.names[l].size());
+            mcfarr[l]=ptax.values(l);
+  
+            // if both fixed thresholds and precalculated identity thresholds exist, mix both in 3:1 ratio
+            if (tax.cutoff.size()>0){ // if only fixed id threshold exists
+              float ncf=(bid-tax.cutoff[l]+0.02)/tax.cutoffcoef[l];
+              mcfarr[l]=ncf<ptax.values(l)?ncf:ptax.values(l);
+            }
+  //            mcf=ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
+  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.05;
+  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.1;
+  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
+  
+            if (mcfarr[l]>1.0) mcfarr[l]=1.0; else if (mcfarr[l]<0.0) mcfarr[l]=0.0;
+            if (mcfarr[l]<lastmcf) mcfarr[l]=lastmcf;  // do not let confidences get smaller
+            lastmcf=mcfarr[l];
+          }
+      
+          for (int l=0; l<ptax.size() && l<tax.names.size(); ++l){
+  //          outstr+=estr("\t")+(ptax.keys(l)==-1?estr("NA"):tax.names[l].values(ptax.keys(l)))+"\t"+ptax.values(l)+"\t"+(taxcutoff.size()?taxcutoff[l]:estr("-"));
+            outstr+=estr("\t")+(ptax.keys(l)==-1?estr("NA"):tax.names[l].values(ptax.keys(l)))+"\t"+mcfarr[l]+"\t"+ptax.values(l);
+          }
+          outstr+="\t";
+        }
+        outstr+="\n";
+        mtdata.m.lock();
+        cout << outstr; outstr.clear();
+        mtdata.m.unlock();
+
+        if (mtdata.print_hits){
+          outstr+="#\t";
+          etax& tax(mtdata.seqdb->taxa.at(0));
+          for (int l=pinfo.matchcounts.size()-1; l>0; --l){
+            ealigndata& adata(pinfo.matchcounts[l]);
+  //          outstr+="# "+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+adata.s2+"\t"+adata.e2+"\t"+tax2str(mtdata,adata.seqid)+"\n";
+            outstr+=mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t";
+          }
+          outstr+="\n";
+        }
+  //      outstr+=pinfo.tophit.profile.str() + "\n";
+        if (mtdata.print_align){
+          pinfo.tophit.profile.inv();
+          outstr+=pinfo.tophit.profile.str() + "\n";
+          outstr+=pinfo.tophit.palign_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
+          outstr+="\n";
+        }
+//      if (pinfo.tophit.pair)
+//        outstr+=estr("#pair: ")+pinfo.tophit.pair->score()+"\t"+pinfo.tophit.pair->identity()+"\t"+pinfo.tophit.pair->matches+"\t"+pinfo.tophit.pair->mismatches+"\t"+pinfo.tophit.pair->gaps+"\t"+pinfo.tophit.pair->s2+"\t"+pinfo.tophit.pair->e2+"\n";
+//      outstr+="# "+pinfo.tophit.profile.str()+"\n";
+
       }
     }
 
@@ -4851,6 +5876,8 @@ void taskSearch()
   }
   delete searchws.bitmask;
 }
+*/
+
 
 void help()
 {
@@ -4939,11 +5966,211 @@ void loadCluster(eseqdb& db,const estr& cfile)
   }
 }
 
+void taskClusterDB()
+{
+//  ebasicarray<ekmerarray> otukmers;
+//  otukmers.init(MAXSIZE);
+
+  eseqdb &db(*mtdata.seqdb);
+
+  euintarray otukmersize;
+  eintarray seqotu;
+  euintarray idcount;
+  eintarray kmerpos;
+  eintarray tmpmapped;  
+
+  idcount.reserve(db.seqs.size());
+  kmerpos.reserve(db.seqs.size());
+
+  eintarray &len_si(mtdata.len_si);
+
+  mtdata.m.lock();
+  seqotu=db.seqotu;
+  mtdata.m.unlock();
+
+
+  int dbotus=0;
+  int ipos=0,ilen=0;
+  int mapped=0;
+  while (1) {
+    mtdata.m.lock();
+    while (mtdata.ilen==0) mtdata.seqsSignal.wait(mtdata.m);
+    if (mtdata.ilen==-1) { mtdata.m.unlock(); break; }
+    ipos=mtdata.ipos+mtdata.ilen*mtdata.threadi;
+    ilen=mtdata.ilen;
+    dbotus=mtdata.dbotus;
+
+    int totalt=(db.seqs.size()-mtdata.ipos)/mtdata.ilen;
+    if (totalt==0) break;
+    if (mtdata.threadi+1==totalt){
+      cout << endl << mtdata.threadi << " " << ipos << " " << ipos+ilen << " " << totalt << endl;
+    }
+    ldieif(ipos<0,"ipos is negative");
+  
+    mtdata.threadi=(mtdata.threadi+1)%totalt;
+    otukmersize=mtdata.otukmersize;
+/*
+    for (int i=0; i<db.otukmers.size(); ++i){
+      for (int j=db.otukmers[i].size(); j<db.otukmers[i].size(); ++j)
+        otukmers[i].add(db.otukmers[i][j]);
+    }
+*/
+    for (int i=mapped; i<mtdata.mapped.size(); ++i)
+      seqotu[mtdata.mapped[i]]=db.seqotu[mtdata.mapped[i]];
+    mapped=mtdata.mapped.size();
+//    cout << endl << mtdata.threadi << " " << ipos << " " << ipos+ilen << endl;
+    mtdata.m.unlock();
+    for (int i=ipos; i<ipos+ilen && i<len_si.size(); ++i){
+      if (seqotu[len_si[i]]!=-1) continue;
+
+//      cout << endl << i << endl;
+      eseq& s(db.seqs.values(len_si[i]));
+      idcount.init(dbotus,0);
+      kmerpos.init(dbotus,0u);
+
+      kmercount_single(db.otukmers,s,idcount,kmerpos,otukmersize);
+
+      int ibest=0;
+      for (int l=1; l<idcount.size(); ++l){
+        if (idcount[l]>idcount[ibest]) ibest=l;
+      }
+      if (float(idcount[ibest])/s.seqlen >= 0.80){
+        tmpmapped.add(len_si[i]);
+        seqotu[len_si[i]]=ibest;
+      }
+    }
+    mtdata.m.lock();
+//    cout << endl << "mapped: " << tmpmapped.size() << endl;
+    for (int i=mapped; i<mtdata.mapped.size(); ++i)
+      seqotu[mtdata.mapped[i]]=db.seqotu[mtdata.mapped[i]];
+    for (int i=0; i<tmpmapped.size(); ++i){
+      db.seqotu[tmpmapped[i]]=seqotu[tmpmapped[i]];
+      mtdata.mapped.add(tmpmapped[i]);
+    }
+    mapped=mtdata.mapped.size();
+    mtdata.m.unlock();
+    tmpmapped.clear();
+   }
+}
+
+void makeClusterMT(eseqdb& db) //,const estr& cfile)
+{
+  euintarray kmermask;
+
+  kmermask.init(MAXSIZE,0);
+//  eseqdb &db(*mtdata.seqdb);
+  mtdata.ipos=0;
+  mtdata.ilen=0;
+  mtdata.dbotus=0;
+  mtdata.threadi=0;
+  mtdata.otukmersize.init(MAXSIZE,0);
+//  db.otukmers.init(MAXSIZE);
+  for (uint32_t i=0; i<MAXSIZE; ++i){
+    if (akmers[i&0xFu]==0u) continue;
+    db.otukmers[i].reservep(db.seqs.size());
+  }
+
+  eintarray &len_si(mtdata.len_si);
+
+  len_si=iheapsort(db.seqs);
+  db.otus.reserve(db.seqs.size()); // worst case scenario
+  db.otus.add(eintarray(len_si[0]));
+  db.seqotu.init(db.seqs.size(),-1);
+  db.seqotu[len_si[0]]=0;
+
+  eintarray tmpkmers;
+  euintarray idcount;
+  eintarray kmerpos;
+
+
+  tmpkmers.init(MAXSIZE,-1);
+  otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
+  idcount.reserve(db.seqs.size());
+  kmerpos.reserve(db.seqs.size());
+  idcount.init(db.otus.size(),0u);
+  kmerpos.init(db.otus.size(),0u);
+ 
+  const int seqcount=10000;
+  const int updcount=100;
+  eintarray seqotu;
+  seqotu=db.seqotu;
+
+  ethreads t;
+  t.run(taskClusterDB,evararray(),nthreads);
+
+  int mapped=0;
+
+  for (int i=0; i<db.seqs.size(); ++i){
+    if (i%updcount==0 && i>=1000) {
+      mtdata.m.lock();
+      if (i==1000){
+        int count=0;
+        for (int l=0; l<db.otukmers.size(); ++l){
+          if (db.otukmers[l].size()>0.5*db.otus.size()){
+            kmermask[l]=1;
+            db.otukmers[l].clear();
+            ++count;
+          }
+        }
+        cout << "fcount: " << count << " db.otus: " << db.otus.size() << endl;
+      }
+      mtdata.dbotus=db.otus.size();
+      for (int l=0; l<db.otukmers.size(); ++l)
+        mtdata.otukmersize[l]=db.otukmers[l].size();
+
+      for (int l=mapped; l<mtdata.mapped.size(); ++l)
+        seqotu[mtdata.mapped[l]]=db.seqotu[mtdata.mapped[l]];
+      mapped=mtdata.mapped.size();
+      mtdata.ipos=i+seqcount*2;
+      mtdata.ilen=seqcount;
+      mtdata.seqsSignal.broadcast();
+      fprintf(stderr,"\rseq: %i otus: %li mapped: %li",i,db.otus.size(),mtdata.mapped.size());
+      mtdata.m.unlock();
+    }
+    if (seqotu[len_si[i]]!=-1) continue;
+
+    eseq& s(db.seqs.values(len_si[i]));
+    idcount.init(db.otus.size(),0);
+    kmerpos.init(db.otus.size(),0u);
+
+    kmercount_single(db.otukmers,s,idcount,kmerpos);
+
+    int ibest=0;
+    for (int l=1; l<idcount.size(); ++l){
+      if (idcount[l]>idcount[ibest]) ibest=l;
+    }
+    if (float(idcount[ibest])/s.seqlen >= 0.80) {
+    } else {
+      db.otus.add(eintarray(len_si[i]));
+      ibest=db.otus.size()-1;
+      seqotu[len_si[i]]=ibest;
+//      if (i<1000)
+      otukmeradd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul,kmermask);
+    }
+  }
+
+  t.wait();
+
+  fprintf(stderr,"\rseq: %li clusters: %li\n",db.seqs.size(),(long)db.otus.size());
+/*
+  if (cfile.len()){
+    efile f(cfile,"w");
+    for (int i=0; i<db.otus.size(); ++i){
+      f.write(estr(i));
+      for (int j=0; j<db.otus[i].size(); ++j)
+        f.write(" "+estr(db.otus[i][j]));
+      f.write("\n");
+    }
+    f.close();
+  }
+*/
+ 
+}
+
 
 void makeCluster(eseqdb& db,const estr& cfile)
 {
     // phase 1: find all cluster seeds, but do not add non-seeds in first phase
-//    eintarray dbotus;
   eintarray tmpkmers;
   euintarray idcount;
   eintarray kmerpos;
@@ -4953,9 +6180,6 @@ void makeCluster(eseqdb& db,const estr& cfile)
   db.otus.reserve(db.seqs.size()); // worst case scenario
   db.otus.add(eintarray(len_si[0]));
   db.seqotu[len_si[0]]=0;
-//    dbotus.add(len_si[0]);
-
-//    fprintf(stderr,"# adding kmers from %i\n",db.otus[0][0]);
 
   tmpkmers.init(MAXSIZE,-1);
   otukmeradd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
@@ -4963,26 +6187,15 @@ void makeCluster(eseqdb& db,const estr& cfile)
   kmerpos.reserve(db.seqs.size());
   idcount.init(db.otus.size(),0u);
   kmerpos.init(db.otus.size(),0u);
-//    uint32_t sp=0u;
-//    uint32_t kp=8u;
   
   for (i=1; i<db.seqs.size(); ++i){
     eseq& s(db.seqs.values(len_si[i]));
     if (i%100==0) 
       fprintf(stderr,"\rseq: %i otus: %li",i,db.otus.size());
-//      if (sp+1<sp){
-      idcount.init(db.otus.size(),0);
-//        sp=0;
-//      }
-//      if (kp+s.seqlen<kp){
-      kmerpos.init(db.otus.size(),0u);
-//        kp=8u;
-//      }
+    idcount.init(db.otus.size(),0);
+    kmerpos.init(db.otus.size(),0u);
 
-//      kmercount_single3(db.otukmers,s,sp,kp,idcount,kmerpos);
-//      kmercount_single2(db.otukmers,s,kp,idcount,kmerpos);
     kmercount_single(db.otukmers,s,idcount,kmerpos);
-//      kp+=s.seqlen;
 
     int ibest=0;
     for (int l=1; l<idcount.size(); ++l){
@@ -5157,6 +6370,77 @@ void saveSequences(eseqdb& db,const estr& filename)
   f.close();
 }
 
+void loadProtSequences(eseqdb& db,int argi=2)
+{
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
+  if (getParser().args.size()>argi)
+    dbfile=getParser().args[argi];
+  else if (!efile(dbfile).exists())
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
+  if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
+
+  estr str2id,str2seq,line;
+  egzfile f;
+  f.open(dbfile,"r");
+  f.readln(line);
+  while (!f.eof()){
+    str2id=line;
+    ldieif(str2id.len()==0 || str2id[0]!='>',"Unexpected line: "+str2id);
+
+    str2seq.clear();
+    while (f.readln(line) && line.len() && line[0]!='>') str2seq+=line;
+    str2id.del(0,1);
+
+    int i=str2id.findchr(" \t");
+    if (i!=-1l) str2id.del(i); // only keep id up to first white space
+//    if (dbfilter.len() && str2id!=dbfilter) continue;
+
+    eseq s;
+    s.setprot(str2seq);
+    db.seqind.add(str2id,db.seqs.size());
+    db.seqs.add(str2id,s);
+  }
+  f.close();
+
+  db.seqotu.init(db.seqs.size(),-1);
+  db.otukmers.init(PMAXSIZE);
+//  estr cfile=dbfile+".mscluster";
+//  if (nocluster){
+    eintarray tmpkmers;
+    db.otus.reserve(db.seqs.size());
+    db.otus.add(eintarray(0));
+    tmpkmers.init(PMAXSIZE,-1);
+    otukmerprotadd(db.otukmers,0,db.seqs.values(db.otus[0][0]),tmpkmers,0,akmers,0xFul);
+    for (int i=1; i<db.seqs.size(); ++i){
+      eseq& s(db.seqs.values(i));
+      db.otus.add(eintarray(i));
+      int ibest=db.otus.size()-1;
+      db.seqotu[i]=ibest;
+      otukmerprotadd(db.otukmers,ibest,s,tmpkmers,ibest,akmers,0xFul);
+    }
+/*
+//  } else if (dbfilter.len()==0 && efile(cfile).exists()){ // load clustering
+  } else if (efile(cfile).exists()){ // load clustering
+    loadCluster(db,cfile);
+    ldieif(db.otus.size()==0,"no clusters in database");
+  }else{ // perform clustering
+    fprintf(stderr,"# no clustering file found, performing clustering\n");
+    makeCluster(db,cfile);
+  }
+*/
+  int fcount=0;
+  int okmercount=0;
+  for (int i=0; i<db.otukmers.size(); ++i){
+    if (db.otukmers[i].size()>0)
+      ++okmercount;
+    if (db.otukmers[i].size()>1000 && db.otukmers[i].size()>db.otus.size()*0.50){
+      db.otukmers[i].clear();
+      ++fcount;
+    }
+  }
+//  cerr << "# fcount: " << fcount << " otukmercount: " << okmercount << endl;
+}
+
 
 void loadSequences(eseqdb& db,int argi=2)
 {
@@ -5187,6 +6471,15 @@ void loadSequences(eseqdb& db,int argi=2)
     db.seqs.add(str2id,eseq(str2seq));
   }
   f.close();
+}
+
+void initDB(eseqdb& db,int argi=2){
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
+  if (getParser().args.size()>argi)
+    dbfile=getParser().args[argi];
+  else if (!efile(dbfile).exists())
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
+  if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
   db.seqotu.init(db.seqs.size(),-1);
   db.otukmers.init(MAXSIZE);
@@ -5652,6 +6945,32 @@ void actionCluster()
   exit(0);
 }
 
+void actionClusterDB()
+{
+  cerr << "ClusterDB: loading database" << endl;
+
+  doInit();
+
+  eseqdb db;
+  db.otukmers.init(MAXSIZE);
+  mtdata.seqdb=&db;
+  mtdata.finished=false;
+
+//  nthreads=1;
+
+  loadSequences(db,1);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+
+  makeClusterMT(db);
+
+//  processQuery(db,getParser().args[1],taskCluster);
+  exit(0);
+}
+
+
+
+
 void actionClusterCompress()
 {
   cerr << "Compressing: denovo reference" << endl;
@@ -5664,6 +6983,7 @@ void actionClusterCompress()
   nthreads=1;
 
   loadSequences(db);
+  initDB(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
 //  ldieif(db.seqs.size()==0,"empty database");
   processQuery(db,getParser().args[1],taskClusterCompress);
@@ -5677,6 +6997,7 @@ void actionPairend()
 
   eseqdb db;
   loadSequences(db,3);
+  initDB(db,3);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
   ldieif(getParser().args.size()<3,"not enough arguments, syntax: mapseq -paired <paired1.fna> <paired2.fna> [db] [[tax1] [tax2] ...]");
@@ -5689,9 +7010,27 @@ void actionPairend()
   exit(0);
 }
 
-estr mapseq(const estr& seq,eseqdb& db)
+estr mapseq(const estr& seq,eseqdb& db,estrhash& sids)
 {
-  eseq s(seq);
+  if (!seq.len()) return("{\"error\":\"empty sequence\"}"); 
+
+  estr tmpstr;
+  estr sid;
+  eseq s;
+  if (seq[0]=='>'){
+    int i=seq.find("\n");
+    if (i==-1) return("{\"error\":\"missing sequence\"}");
+    sid=seq.substr(0,i);
+    tmpstr=seq.substr(i+1);
+    tmpstr.replace("\n","");
+    s.setseq(seq.substr(i+1));
+  }else if (sids.exists(seq) && db.seqs.findkey(sids[seq])>=0){ // accession id to sequence in 
+    s=db.seqs[sids[seq]];
+  }else{
+    tmpstr=seq;
+    tmpstr.replace("\n","");
+    s.setseq(seq);
+  }
   
   estr outstr;
   esearchws searchws;
@@ -5714,68 +7053,71 @@ estr mapseq(const estr& seq,eseqdb& db)
 
   earray<epredinfo> pinfoarr;
   seqsearch("query",db,s,pinfoarr,searchws);
-  if (pinfoarr.size()==0) return("nohit");
+  if (pinfoarr.size()==0) return("{\"error\":\"No hits found for your search\"}");
   
-  for (int pi=0; pi<pinfoarr.size(); ++pi){
-    epredinfo& pinfo(pinfoarr[pi]);
-    float taxcutoffmin=pinfo.matchcounts[0].identity();
-    float bid=pinfo.tophit.identity();
-    if (db.taxa.size() && db.taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
-      eseqtax &tmptaxhit(*db.taxa.at(0).seqs[pinfo.tophit.seqid]);
-      if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
-    }
-      
-    outstr+="[{\"id\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"score\":"+pinfo.tophit.score()+",\"identity\":"+pinfo.tophit.identity()+",\"matches\":"+pinfo.tophit.matches+",\"mismatches\":"+pinfo.tophit.mismatches+",\"gaps\":"+pinfo.tophit.gaps+",\"qstart\":"+(s.seqstart+pinfo.tophit.s1)+",\"qend\":"+(s.seqstart+pinfo.tophit.e1)+",\"dstart\":"+pinfo.tophit.s2+",\"dend\":"+pinfo.tophit.e2+",\"strand\":"+(pinfo.tophit.revcompl?"1":"0");
+  epredinfo *topinfo=&pinfoarr[0];
+  for (int pi=1; pi<pinfoarr.size(); ++pi){
+    if (pinfoarr[pi].tophit.score()>topinfo->tophit.score()) topinfo=&pinfoarr[pi];
+  }
+
+  epredinfo& pinfo(*topinfo);
+  float taxcutoffmin=pinfo.matchcounts[0].identity();
+  float bid=pinfo.tophit.identity();
+  if (db.taxa.size() && db.taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+    eseqtax &tmptaxhit(*db.taxa.at(0).seqs[pinfo.tophit.seqid]);
+    if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+  }
+    
+  outstr+="[{\"id\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"score\":"+pinfo.tophit.score()+",\"identity\":"+pinfo.tophit.identity()+",\"matches\":"+pinfo.tophit.matches+",\"mismatches\":"+pinfo.tophit.mismatches+",\"gaps\":"+pinfo.tophit.gaps+",\"qstart\":"+(s.seqstart+pinfo.tophit.s1)+",\"qend\":"+(s.seqstart+pinfo.tophit.e1)+",\"dstart\":"+pinfo.tophit.s2+",\"dend\":"+pinfo.tophit.e2+",\"strand\":"+(pinfo.tophit.revcompl?"1":"0");
 //    outstr+="query\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
-       
-    pinfo.tophit.profile.inv();
-    outstr+=",\"sumalign\":\""+pinfo.tophit.profile.str()+"\"";
-    outstr+=",\"alignment\":\""+pinfo.tophit.align_str(s,db.seqs.values(pinfo.tophit.seqid)).replace("\n","\\n")+"\"";
-
-    if (db.taxa.size()==0){
-      double topscore=pinfo.tophit.score();
-      double tscore=0.0;
-      for (int t=0; t<pinfo.matchcounts.size(); ++t)
-        tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
-      outstr+=",\"taxa\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"confidence\":"+(1.0/tscore);
-//      outstr+="\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
-    }
-
-    edoublearray taxscores;
-    for (int t=0; t<db.taxa.size(); ++t){
-      etax& tax(db.taxa.at(t));
-      
-      earrayof<double,int> ptax;
-      edoublearray taxscores;
-      efloatarray mcfarr;
-      taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts);
-      taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax);
      
-      if (ptax.size()>2){
-        outstr+=",\"taxa\":\""+tax.names[0].at(ptax.keys(0))+";"+tax.names[1].at(ptax.keys(1))+";"+tax.names[2].at(ptax.keys(2))+"\",\"confidence\":"+ptax.values(2);
-      }else{
-        outstr+=",\"error\":\"unexpected number of taxa levels\"";
-      }
+  pinfo.tophit.profile.inv();
+  outstr+=",\"sumalign\":\""+pinfo.tophit.profile.str()+"\"";
+  outstr+=",\"alignment\":\""+pinfo.tophit.align_str(s,db.seqs.values(pinfo.tophit.seqid)).replace("\n","\\n")+"\"";
 
+  if (db.taxa.size()==0){
+    double topscore=pinfo.tophit.score();
+    double tscore=0.0;
+    for (int t=0; t<pinfo.matchcounts.size(); ++t)
+      tscore+=exp((pinfo.matchcounts[t].score()-topscore)*sweightabs);
+//      tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
+    outstr+=",\"taxa\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"confidence\":"+(1.0/tscore);
+//      outstr+="\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+  }
+
+  edoublearray taxscores;
+  for (int t=0; t<db.taxa.size(); ++t){
+    etax& tax(db.taxa.at(t));
+    
+    earrayof<double,int> ptax;
+    edoublearray taxscores;
+    efloatarray mcfarr;
+    taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts,s.seqlen);
+    taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax,s.seqlen);
+   
+    if (ptax.size()>3){
+      outstr+=",\"taxa\":\""+tax.names[0].at(ptax.keys(0))+";"+tax.names[1].at(ptax.keys(1))+";"+tax.names[2].at(ptax.keys(2))+";"+tax.names[3].at(ptax.keys(3))+"\",\"confidence\":"+ptax.values(3);
+    }else{
+      outstr+=",\"error\":\"unexpected number of taxa levels\"";
     }
     outstr+="}";
 
+    efloatarray tmpmcfarr;
+    earrayof<double,int> tmptax;
     for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
       ealigndata& adata(pinfo.matchcounts[l]);
+      taxScore(tmptax,tmpmcfarr,adata,pinfo,taxscores,tax,s.seqlen);
       outstr+=",{\"id\":\""+db.seqs.keys(adata.seqid)+"\",\"score\":"+adata.score()+",\"identity\":"+adata.identity()+",\"matches\":"+adata.matches+",\"mismatches\":"+adata.mismatches+",\"gaps\":"+adata.gaps+",\"qstart\":"+(s.seqstart+adata.s1)+",\"qend\":"+(s.seqstart+adata.e1)+",\"dstart\":"+adata.s2+",\"dend\":"+adata.e2+",\"strand\":"+(adata.revcompl?"1":"0");
       adata.profile.inv();
       outstr+=",\"sumalign\":\""+adata.profile.str()+"\"";
       outstr+=",\"alignment\":\""+adata.align_str(s,db.seqs.values(adata.seqid)).replace("\n","\\n")+"\"";
-
-      if (db.taxa.size() && adata.seqid<db.taxa.at(0).seqs.size() && db.taxa.at(0).seqs[adata.seqid]!=0x00){
-         etax& tax(db.taxa.at(0));
-         eseqtax& stax(*tax.seqs[adata.seqid]);
-         outstr+=",\"taxa\":\""+(stax.tl.size()>2?tax.names[0].at(stax.tl[0].tid)+";"+tax.names[1].at(stax.tl[1].tid)+";"+tax.names[2].at(stax.tl[2].tid):"")+"\",\"confidence\":"+(taxscores.size()>2?exp((1.0l-pinfo.tophit.score()/adata.score())*sweight)/taxscores[2]:0.0)+"}";
-      }
+      outstr+=",\"taxa\":\""+tax.names[0].at(tmptax.keys(0))+";"+tax.names[1].at(tmptax.keys(1))+";"+tax.names[2].at(tmptax.keys(2))+";"+tax.names[3].at(tmptax.keys(3))+"\",\"confidence\":"+tmptax.values(3);
+//         outstr+=",\"taxa\":\""+(stax.tl.size()>3?tax.names[0].at(stax.tl[0].tid)+";"+tax.names[1].at(stax.tl[1].tid)+";"+tax.names[2].at(stax.tl[2].tid)+";"+tax.names[3].at(stax.tl[3].tid):"")+"\",\"confidence\":"+tmptax.values(3)+"}";
+      outstr+="}";
     }
-
-    outstr+="]";
   }
+  outstr+="]";
+
   return(outstr);
 }
 
@@ -5785,13 +7127,34 @@ void actionDaemon()
 
   eseqdb db;
   loadSequences(db,1);
+  initDB(db,1);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
   loadTaxonomy(db,2);
+
+  estrhash sids;
+  for (int i=0; i<db.seqs.size(); ++i)
+    sids.add(db.seqs.keys(i).explode(":")[0],db.seqs.keys(i));
   
-  epregisterFuncD(mapseq,evarRef(db));
+  epregisterFuncD(mapseq,evararray(evarRef(db),evarRef(sids)));
   eparseArgs();
   getSystem().run();
+}
+
+void actionProtSearch()
+{
+  ldieif(getParser().args.size()<3,"syntax: <query.fna> <db.faa> [db.tax]");
+  eseqdb db;
+  loadProtSequences(db);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+
+//  loadTaxonomy(db);
+  printSearchHeader(db);
+
+  processQuery(db,getParser().args[1],taskProtSearch);
+
+  exit(0);
 }
 
 void actionLoadTaxBinary()
@@ -5839,6 +7202,7 @@ void actionConvertTax()
 
   eseqdb db;
   loadSequences(db,1);
+  initDB(db,1);
   loadTaxonomy(db,2);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
@@ -5858,6 +7222,8 @@ void actionConvert()
 
   eseqdb db;
   loadSequences(db,1);
+  initDB(db,1);
+
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
   saveSequences(db,getParser().args[1]+".msfna");
@@ -5873,6 +7239,7 @@ void actionCompress()
 
   eseqdb db;
   loadSequences(db);
+  initDB(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
   processQuery(db,getParser().args[1],taskCompress);
@@ -5887,6 +7254,7 @@ void actionDecompress()
 
   eseqdb db;
   loadSequences(db);
+  initDB(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
 
@@ -5933,6 +7301,7 @@ int emain()
   cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
   initdlt();
   epregister(sweight);
+  epregister(sweightabs);
   epregister(nocluster);
   epregister(otulim);
   epregister(lambda);
@@ -5954,6 +7323,7 @@ int emain()
   outfmt.add("confidences",outfmt_confidences);
   outfmt.add("simple",outfmt_simple);
 
+  getParser().actions.add("clusterdb",actionClusterDB);
   getParser().actions.add("cluster",actionCluster);
   getParser().actions.add("clustercompress",actionClusterCompress);
   getParser().actions.add("compress",actionCompress);
@@ -5963,6 +7333,7 @@ int emain()
   getParser().actions.add("loadtaxbinary",actionLoadTaxBinary);
   getParser().actions.add("decompress",actionDecompress);
   getParser().actions.add("paired",actionPairend);
+  getParser().actions.add("psearch",actionProtSearch);
 //  getParser().actions.add("daemon",actionDaemon);
   daemonArgs(actionDaemon);
 
@@ -6016,6 +7387,7 @@ int emain()
   ldieif(db.seqs.size()==0,"empty database");
 
   loadTaxonomy(db);
+  initDB(db);
 
 //  eintarray kmerpos;
 //  ebasicarray<uint32_t> idcount;

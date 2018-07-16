@@ -25,6 +25,13 @@
 #define IKMERMASK (IKMERMAX-1ul)
 
 #include "data/prot_trans_table.h"
+const uint32_t aacount=21u;
+char aa[]={'A','N','C','P','D','Q','E','R','F','S','G','T','H','V','I','W','K','Y','L','M','*'};
+uint32_t aacomp[]={0x0u,0x1u,0x2u,0x3u,0x4u,0x5u,0x6u,0x7u,0x8u,0x9u,0xAu,0xBu,0xCu,0xDu,0xEu,0xFu,0x10u,0x11u,0x12u,0x13u,0x14u};
+
+const int prot_blosum62_size=aacount*aacount;
+int8_t prot_blosum62[prot_blosum62_size];
+
 
 
 uint32_t nuccount=12u;
@@ -32,6 +39,9 @@ uint32_t nuc[]={'a','t','g','c','A','T','u','U','G','C','n','N'};
 uint32_t compnuc[]={0x0u,0x1u,0x2u,0x3u,0x0u,0x1u,0x1u,0x1u,0x2u,0x3u,0x0u,0x0u};
 uint32_t revnuc[]={0x1u,0x0u,0x3u,0x2u};
 uint32_t consnuc[]={0x0001u,0x0010u,0x0100u,0x1000u};
+
+const unsigned int codon2prot_size=1u<<8u;
+uint8_t codon2prot[codon2prot_size];
 
 unsigned char seq_match_table[IKMERMAX];
 unsigned char seq_comp_table[IKMERMAX];
@@ -67,7 +77,12 @@ char oct2hex(unsigned char o)
   return('-');
 }
 
-void chr2hex(char *tmpstr,unsigned char c)
+void char2int(char *tmpstr,char c)
+{
+  sprintf(tmpstr,"%hhi",c);
+}
+
+void uchr2hex(char *tmpstr,unsigned char c)
 {
   tmpstr[0]='0';
   tmpstr[1]='x';
@@ -140,6 +155,13 @@ void initProtCompressionTable()
   uint32_t i;
   for (i=0; i<(1u<<8u); ++i)
     prot_comp_table[i]=0x00u;
+  for (int j=0; j<aacount; ++j){
+    prot_comp_table[aa[j]]=aacomp[j];
+    if (aa[j]!='*')
+      prot_comp_table[tolower(aa[j])]=aacomp[j];
+  }
+
+/*
   prot_comp_table['*']=0x09u;
   prot_comp_table['A']=prot_comp_table['a']=0x0Eu;
   prot_comp_table['N']=prot_comp_table['n']=0x10u;
@@ -161,6 +183,58 @@ void initProtCompressionTable()
   prot_comp_table['Y']=prot_comp_table['y']=0x11u;
   prot_comp_table['L']=prot_comp_table['l']=0x07u;
   prot_comp_table['M']=prot_comp_table['m']=0x24u;
+*/
+  for (int i=0; i<prot_blosum62_size; ++i)
+    prot_blosum62[i]=0x00;
+
+  efile f;
+  f.open("data/BLOSUM62.mat","r");
+  estrarray arr;
+  estrarray head;
+  while (!f.eof() && f.readarr(arr)){
+    if (arr.size()==0 || arr[0][0]=='#') continue;
+    if (head.size()==0) { head=arr; continue; }
+    for (int i=1; i<arr.size(); ++i){
+//      cout << arr[0][0] << " " << head[i][0] << " " << arr[i].i() << endl;
+      prot_blosum62[prot_comp_table[arr[0][0]]*aacount+prot_comp_table[head[i][0]]]=arr[i].i();
+    }
+  }
+}
+
+void initProtTable()
+{
+  efile f;
+  f.open("data/transl_table","r");
+
+  int il=0;
+  estr line[5];
+  while (!f.eof() && il<5 && f.readln(line[il])) ++il;
+  ldieif(il!=5,"not enough lines in prot_trans_table: "+estr(il));
+
+  for (int i=0; i<codon2prot_size; ++i)
+    codon2prot[i]=0;
+  
+  for (int i=0; i<line[0].len(); ++i){
+    unsigned int pkmer=((seq_comp_table[line[4][i]]&0x3u)<<4u) | ((seq_comp_table[line[3][i]]&0x3u)<<2u) | seq_comp_table[line[2][i]]&0x3u;
+    codon2prot[pkmer]=prot_comp_table[line[0][i]];
+//    cout << line[2][i] << line[3][i] << line[4][i] << " " << line[0][i] << endl;
+  }
+
+  const unsigned long codonmask=((0x1u<<6u) - 1u);
+  for (unsigned long i=0; i<PKMERMAX; ++i){
+    unsigned long tmp=i;
+    unsigned long res=0x0ul;
+    kmer_prot_lt[i]=codon2prot[i&codonmask] | ((unsigned long)(codon2prot[(i>>6u)&codonmask])<<6u) | ((unsigned long)(codon2prot[(i>>12u)&codonmask])<<12u);
+  }
+  for (unsigned long i=0; i<PKMERMAX; ++i){
+    unsigned long tmp=i;
+    unsigned long res=0x0ul;
+    for (int j=0; j<PKMERSIZE; ++j){
+      res=(res<<2u)|(unsigned long)(revnuc[0x3ul&tmp]);
+      tmp>>=2u;
+    }
+    kmer_protrev_lt[i]=kmer_prot_lt[res];
+  }
 }
 
 void initCompressionTable()
@@ -212,6 +286,7 @@ void initCompressionTableStatus()
       seq_comp_table[(nuc[i]<<8u) | nuc[j]]=0x00|(compnuc[i]<<2u)|compnuc[j]; // when both characters are nucleotides reset the status code to 0x0X = noerror
   }
 }
+/*
 void initProtTable()
 {
   const unsigned long codonmask=((0x1u<<6u) - 1u);
@@ -230,6 +305,7 @@ void initProtTable()
     kmer_protrev_lt[i]=kmer_prot_lt[res];
   }
 }
+*/
 
 void initRevComplementTable()
 {
@@ -326,16 +402,26 @@ void initAlignment()
 int emain()
 {
   char tmpstr[3+sizeof(long)*2u];
-  efile f;
-  f.open("kmerseqtables-data.h","w");
+  efile f,f2;
+  f.open("kmerseqtables-data.cpp","w");
+  f2.open("kmerseqtables-data.h","w");
+  f.write("#include <stdint.h>\n\n");
+
+//  f2.write("extern const uint32_t aacount;\n\n");
+  f2.write("const uint32_t aacount=");
+  uint2hex(tmpstr,aacount);
+  f2.write(tmpstr);
+  f2.write(";\n\n");
+
 
   initMatchTable();
+  f2.write("extern unsigned char seq_match_table[];\n\n");
   f.write("unsigned char seq_match_table[]={\n");
-  chr2hex(tmpstr,seq_match_table[0]);
+  uchr2hex(tmpstr,seq_match_table[0]);
   f.write(tmpstr);
   for (int i=1; i<(1u<<16u); ++i){
     f.write(",");
-    chr2hex(tmpstr,seq_match_table[i]);
+    uchr2hex(tmpstr,seq_match_table[i]);
     f.write(tmpstr);
     if (i%20==0) f.write("\n");
   }
@@ -343,42 +429,46 @@ int emain()
 
   
   initCompressionTable();
+  f2.write("extern unsigned char seq_comp_table[];\n\n");
   f.write("unsigned char seq_comp_table[]={\n");
-  chr2hex(tmpstr,seq_comp_table[0]);
+  uchr2hex(tmpstr,seq_comp_table[0]);
   f.write(tmpstr);
   for (int i=1; i<(1u<<16u); ++i){
     f.write(",");
-    chr2hex(tmpstr,seq_comp_table[i]);
+    uchr2hex(tmpstr,seq_comp_table[i]);
     f.write(tmpstr);
     if (i%20==0) f.write("\n");
   }
   f.write("\n};\n\n");
 
   initProtCompressionTable();
+  f2.write("extern unsigned char prot_comp_table[];\n\n");
   f.write("unsigned char prot_comp_table[]={\n");
-  chr2hex(tmpstr,prot_comp_table[0]);
+  uchr2hex(tmpstr,prot_comp_table[0]);
   f.write(tmpstr);
   for (int i=1; i<(1u<<8u); ++i){
     f.write(",");
-    chr2hex(tmpstr,prot_comp_table[i]);
+    uchr2hex(tmpstr,prot_comp_table[i]);
     f.write(tmpstr);
     if (i%20==0) f.write("\n");
   }
   f.write("\n};\n\n");
 
   initSeqIdent();
+  f2.write("extern unsigned char seq_ident_table[];\n\n");
   f.write("unsigned char seq_ident_table[]={\n");
-  chr2hex(tmpstr,seq_ident_table[0]);
+  uchr2hex(tmpstr,seq_ident_table[0]);
   f.write(tmpstr);
   for (int i=1; i<IKMERMAX; ++i){
     f.write(",");
-    chr2hex(tmpstr,seq_ident_table[i]);
+    uchr2hex(tmpstr,seq_ident_table[i]);
     f.write(tmpstr);
     if (i%20==0) f.write("\n");
   }
   f.write("\n};\n\n");
 
   initProtTable();
+  f2.write("extern unsigned int kmer_prot_lt[];\n\n");
   f.write("unsigned int kmer_prot_lt[]={\n");
   int2hex(tmpstr,kmer_prot_lt[0]);
   f.write(tmpstr);
@@ -390,6 +480,7 @@ int emain()
   }
   f.write("\n};\n\n");
 
+  f2.write("extern unsigned int kmer_protrev_lt[];\n\n");
   f.write("unsigned int kmer_protrev_lt[]={\n");
   int2hex(tmpstr,kmer_protrev_lt[0]);
   f.write(tmpstr);
@@ -403,6 +494,7 @@ int emain()
 
 
   initRevComplementTable();
+  f2.write("extern unsigned int kmer_rev_lt[];\n\n");
   f.write("unsigned int kmer_rev_lt[]={\n");
   int2hex(tmpstr,kmer_rev_lt[0]);
   f.write(tmpstr);
@@ -414,6 +506,7 @@ int emain()
   }
   f.write("\n};\n\n");
 
+  f2.write("extern unsigned int kmer_rev_lt2[];\n\n");
   f.write("unsigned int kmer_rev_lt2[]={\n");
   int2hex(tmpstr,kmer_rev_lt2[0]);
   f.write(tmpstr);
@@ -426,6 +519,7 @@ int emain()
   f.write("\n};\n\n");
 
   initATGCCount();
+  f2.write("extern uint32_t seqatgc_count_lt[];\n\n");
   f.write("uint32_t seqatgc_count_lt[]={\n");
   uint2hex(tmpstr,seqatgc_count_lt[0]);
   f.write(tmpstr);
@@ -437,6 +531,7 @@ int emain()
   }
   f.write("\n};\n\n");
 
+  f2.write("extern uint64_t seqatgc_conv_lt[];\n\n");
   f.write("uint64_t seqatgc_conv_lt[]={\n");
   ulong2hex(tmpstr,seqatgc_conv_lt[0]);
   f.write(tmpstr);
@@ -449,6 +544,7 @@ int emain()
   f.write("\n};\n\n");
 
   initAlignment();
+  f2.write("extern uint64_t seq_alignment_lt[];\n\n");
   f.write("uint64_t seq_alignment_lt[]={\n");
   ulong2hex(tmpstr,seq_alignment_lt[0]);
   f.write(tmpstr);
@@ -460,7 +556,30 @@ int emain()
   }
   f.write("\n};\n\n");
 
+  f2.write("extern uint8_t codon2prot[];\n\n");
+  f.write("uint8_t codon2prot[]={\n");
+  uchr2hex(tmpstr,codon2prot[0]);
+  f.write(tmpstr);
+  for (int i=1; i<codon2prot_size; ++i){
+    f.write(",");
+    uchr2hex(tmpstr,codon2prot[i]);
+    f.write(tmpstr);
+  }
+  f.write("\n};\n\n");
+
+  f2.write("extern int8_t prot_blosum62[];\n\n");
+  f.write("int8_t prot_blosum62[]={\n(int8_t)");
+  char2int(tmpstr,prot_blosum62[0]);
+  f.write(tmpstr);
+  for (int i=1; i<prot_blosum62_size; ++i){
+    f.write(",(int8_t)");
+    char2int(tmpstr,prot_blosum62[i]);
+    f.write(tmpstr);
+  }
+  f.write("\n};\n\n");
   f.close();
+
+  f2.close();
 
   return(0);
 }

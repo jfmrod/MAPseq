@@ -5,7 +5,10 @@
 #include <eutils/logger.h>
 #include "eseq.h"
 
-enum ealignelemtype {AT_NONE,AT_INS,AT_DEL,AT_MATCH,AT_MISS,AT_LEFT,AT_ID,AT_ALIGN,AT_RIGHT,AT_PAIR};
+extern uint8_t codon2prot[];
+extern char aa[];
+
+enum ealignelemtype {AT_NONE,AT_INS,AT_DEL,AT_MATCH,AT_MISS,AT_LEFT,AT_ID,AT_ALIGN,AT_RIGHT,AT_PAIR,AT_COMPAT};
 
 class ealignelem {
  public:
@@ -41,6 +44,18 @@ class ealignscore {
   ealignscore(float _m,float _mi,float _go,float _ge,float _dropoff): match(_m),mismatch(_mi),gapopen(_go),gapext(_ge),dropoff(_dropoff) {}
 };
 
+class epalignscore {
+ public:
+  float dropoff;
+  float pmatch;
+  int8_t *smatrix;
+  uint32_t smatrixwidth;
+  float gapopen;
+  float gapext;
+  epalignscore(): smatrix(0x00),smatrixwidth(0),gapopen(0.0),gapext(0.0),dropoff(0.0),pmatch(0.0) {}
+  epalignscore(int8_t *_m,int swidth,float _pmatch,float _go,float _ge,float _dropoff): smatrix(_m),smatrixwidth(swidth),pmatch(_pmatch),gapopen(_go),gapext(_ge),dropoff(_dropoff) {}
+};
+
 class ealigndata {
  public:
   double _eval;
@@ -73,6 +88,7 @@ class ealigndata {
 //  double score() const { return(matches*matchcost + mismatches*misscost + gaps*gapcost); }
   estr compress(const eseq& s1);
   estr align_str(const eseq& s1,const eseq& s2);
+  estr palign_str(const eseq& s1,const eseq& s2);
 };
 
 estr sali_decompress(const estr& sastr,const eseq& s2);
@@ -98,6 +114,11 @@ void seqcalign_global(const eseq& a,long pa,long ea,const eseq& b,long pb,long e
 void seqcalign_global_noedgegap(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const ealignscore& as);
 void seqcalign_global_noleftedgegap(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const ealignscore& as);
 void seqcalign_global_norightedgegap(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const ealignscore& as);
+void pseqcalign_global(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const epalignscore& as);
+
+void pseqcalign_local_leftext(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const epalignscore& as);
+void pseqcalign_local_rightext(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const epalignscore& as);
+
 
 void seqcalign_local_leftext(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const ealignscore& as);
 void seqcalign_local_rightext(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const ealignscore& as);

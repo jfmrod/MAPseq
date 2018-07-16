@@ -36,7 +36,7 @@ mapref_DATA=$(mapref_files)
 
 # data/mapseqref.fa data/mapseqref.ncbitax data/mapseqref.otutax 
 
-mapseq_SOURCES=mapseq.cpp eseqali.h ekmerhashmap.h ekmerhashmap_dec.h kmerseqtables-data.h eseqali.h eseqali.cpp eseq.h eseq.cpp
+mapseq_SOURCES=mapseq.cpp eseqali.h ekmerhashmap.h ekmerhashmap_dec.h kmerseqtables-data.h kmerseqtables-data.cpp eseqali.h eseqali.cpp eseq.h eseq.cpp
 #mapseq_LDADD=libmapseqali.a eutils/libeutils.la
 #mapseq_LDADD=eutils/libeutils.la
 #mapseq_DEPENDENCIES=kmerseqtables-data.h
@@ -48,6 +48,9 @@ kmerseqtables_SOURCES=kmerseqtables.cpp
 # needed to force make to make this file before making kmerfilter
 #BUILT_SOURCES=kmerseqtables-data.h
 
-kmerseqtables-data.h :
+kmerseqtables-data.h : kmerseqtables$(EXE)
+	./kmerseqtables
+
+kmerseqtables-data.cpp : kmerseqtables$(EXE)
 	./kmerseqtables
 

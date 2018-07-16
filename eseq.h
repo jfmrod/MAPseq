@@ -35,6 +35,7 @@ class eseq
  public:
 //  estr useq;
   estr seq;
+  bool prot;
   long seqlen;
   long seqstart;
   eintarray npos;
@@ -59,6 +60,8 @@ char cnuc2chr(uint32_t cc);
 char cnuc2chru(uint32_t cc);
 
 ostream& operator<<(ostream& stream,const eseq& seq);
+
+unsigned long seqpkmer(const eseq& s,long p1);
 
 #endif
 

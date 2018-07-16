@@ -1,5 +1,7 @@
 #include "eseqali.h"
 
+char aa[]={'A','N','C','P','D','Q','E','R','F','S','G','T','H','V','I','W','K','Y','L','M','*'};
+unsigned long seqpkmer(const eseq& s,long p1);
 void invertstr(estr& str)
 {
   int i;
@@ -154,6 +156,22 @@ inline int maxv3(double v0,double v1,double v2)
 }
 
 #define MAX3(a,b,c) (a>b?(a>c?a:c):(b>c?b:c))
+
+inline void updateF(int i,int j,int h,double *mF,float ms,const epalignscore& pas)
+{
+  mF[i*h*3+j*3+1]=MAX(mF[(i-1)*h*3+j*3]-pas.gapopen,mF[(i-1)*h*3+j*3+1])-pas.gapext;
+  mF[i*h*3+j*3+2]=MAX(mF[i*h*3+(j-1)*3]-pas.gapopen,mF[i*h*3+(j-1)*3+2])-pas.gapext;
+  mF[i*h*3+j*3]=MAX3(mF[(i-1)*h*3+(j-1)*3],mF[(i-1)*h*3+(j-1)*3+1],mF[(i-1)*h*3+(j-1)*3+2])+ms;
+}
+inline double updateFNEG2(int i,int j,int w,int h,double *mF,float ms,const epalignscore& pas)
+{
+  mF[i*h*3+j*3+1]=MAX(mF[(i-1)*h*3+j*3]-pas.gapopen,mF[(i-1)*h*3+j*3+1])-pas.gapext;
+  mF[i*h*3+j*3+2]=MAX(mF[i*h*3+(j-1)*3]-pas.gapopen,mF[i*h*3+(j-1)*3+2])-pas.gapext;
+  mF[i*h*3+j*3]=MAX3(mF[(i-1)*h*3+(j-1)*3],mF[(i-1)*h*3+(j-1)*3+1],mF[(i-1)*h*3+(j-1)*3+2])+ms;
+  return(MAX3(mF[i*h*3+j*3],mF[i*h*3+j*3+1],mF[i*h*3+j*3+2]));
+}
+
+
 
 inline void updateF(int i,int j,int h,double *mF,float ms,const ealignscore& as)
 {
@@ -1069,6 +1087,339 @@ void seqcalign_global_norightedgegap(const eseq& a,long pa,long ea,const eseq& b
   adata.gaps+=gaps;
 }
 
+void pseqcalign_global(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const epalignscore& pas)
+{
+  uint64_t *psa=reinterpret_cast<uint64_t*>(a.seq._str),*psb=reinterpret_cast<uint64_t*>(b.seq._str);
+//  float mc_score[4]={as.match,-as.mismatch,-as.mismatch,-as.mismatch};
+  float score=0;
+  int aligned=0,gaps=0,matches=0,mismatches=0;
+  long maxsize=MAX(ea-pa,eb-pb);
+  long minsize=MIN(ea-pa,eb-pb);
+  ldieif((ea-pa)%3!=0 || (eb-pb)%3!=0,"not codon aligned");
+  if (maxsize==0) return;
+  if (minsize==0) {
+    if (adata.e1==-1 || adata.e1<pa) adata.e1=pa;
+    if (adata.e2==-1 || adata.e2<pb) adata.e2=pb;
+    adata._score+=-pas.gapopen-maxsize/3*pas.gapext;
+    adata.gaps+=maxsize/3;
+    if (ea==pa)
+      adata.profile.add(AT_DEL,maxsize/3);
+    else
+      adata.profile.add(AT_INS,maxsize/3);
+    return;
+  }
+
+  int w=(ea-pa)/3+1;
+  int h=(eb-pb)/3+1;
+
+  int i,j;
+  ws.reserve(w*h*3);
+  double *&mF(ws.mF);
+
+  // no gap penalty for beginning gaps
+  for (i=0; i<w; ++i){
+    mF[i*h*3+1]=-pas.gapopen-i*pas.gapext;
+    mF[i*h*3+2]=-1.0e100l;
+    mF[i*h*3]=-1.0e100l;
+  }
+  for (j=0; j<h; ++j){
+    mF[j*3+1]=-1.0e100l;
+    mF[j*3+2]=-pas.gapopen-j*pas.gapext;
+    mF[j*3]=-1.0e100l;
+  }
+  mF[0]=0.0l;
+  mF[1]=-pas.gapopen;
+  mF[2]=-pas.gapopen;
+
+  uint64_t ca,cb;
+  for (i=1; i<w; ++i){
+    ca=codon2prot[seqpkmer(a,i*3-3+pa)&0x3Fu];
+//    ca=(psa[(i*3-3+pa)/32u]>>(((i-1+pa)%32u)*2ul))&0x3Fu;
+    for (j=1; j<h; ++j) {
+      cb=seqpkmer(b,j*3-3+pb)&0x3Fu;
+//      cb=codon2prot[(psb[(j*3-3+pb)/32u]>>(((j-1+pb)%32u)*2ul))&0x3Fu];
+      updateF(i,j,h,mF,pas.smatrix[ca*pas.smatrixwidth+cb],pas);
+    }
+  }
+
+  if (adata.s1==-1 || adata.s1>pa) adata.s1=pa;
+  if (adata.s2==-1 || adata.s2>pb) adata.s2=pb;
+  if (adata.e1==-1 || adata.e1<ea) adata.e1=ea;
+  if (adata.e2==-1 || adata.e2<eb) adata.e2=eb;
+  adata._score+=MAX3(mF[(w-1)*h*3+(h-1)*3],mF[(w-1)*h*3+(h-1)*3+1],mF[(w-1)*h*3+(h-1)*3+2]);
+
+  aligned=0;
+  matches=0;
+
+  long ti=ea-1;
+  i=w-1; j=h-1;
+  while (i>0 && j>0){
+//    ca=(psa[(i*3-3+pa)/32u]>>(((i*3-3+pa)%32u)*2ul))&0x3Fu;
+//    cb=codon2prot[(psb[(j*3-3+pb)/32u]>>(((j*3-3+pb)%32u)*2ul))&0x3Fu];
+    ca=codon2prot[seqpkmer(a,i*3-3+pa)&0x3Fu];
+    cb=seqpkmer(b,j*3-3+pb)&0x3Fu;
+    switch (maxv3(mF[i*h*3+j*3],mF[i*h*3+j*3+1],mF[i*h*3+j*3+2])){
+      case 0: ++aligned; if (ca==cb) { ++matches; adata.profile.add(AT_MATCH); } else if (pas.smatrix[ca*pas.smatrixwidth+cb]>0){ ++matches; adata.profile.add(AT_COMPAT); } else adata.profile.add(AT_MISS); --j; --i; break;
+      case 1: --i; ++gaps; adata.profile.add(AT_INS); break;
+      case 2: --j; ++gaps; adata.profile.add(AT_DEL); break;
+     default:
+      ldie("unknown code");
+    }
+  }
+  for (;i>0; --i){
+    ++gaps;
+    adata.profile.add(AT_INS);
+  }
+  for (;j>0; --j){
+    ++gaps;
+    adata.profile.add(AT_DEL);
+  }
+
+  adata.matches+=matches;
+  adata.mismatches+=aligned-matches;
+  adata.gaps+=gaps;
+}
+
+
+
+void pseqcalign_local_leftext(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const epalignscore& pas)
+{
+  uint64_t *psa=reinterpret_cast<uint64_t*>(a.seq._str),*psb=reinterpret_cast<uint64_t*>(b.seq._str);
+//  float mc_score[4]={as.match,-as.mismatch,-as.mismatch,-as.mismatch};
+  // need pam score matrix here
+  float score=0.0;
+  int aligned=0,gaps=0,matches=0,mismatches=0;
+  long maxsize=MAX(ea-pa,eb-pb);
+  long minsize=MIN(ea-pa,eb-pb);
+  ldieif((ea-pa)%3!=0 || (eb-pb)%3!=0,"not codon aligned");
+  if (minsize==0) { // we set the leftmost part to the rightmost part of the sequence (in case we are aligning 0bp against Xbp long sequence)
+    if (adata.s1==-1 || adata.s1>ea) adata.s1=ea;
+    if (adata.s2==-1 || adata.s2>eb) adata.s2=eb;
+//    if (adata.e1==-1 || adata.e1<ea) adata.e1=ea;
+//    if (adata.e2==-1 || adata.e2<eb) adata.e2=eb;
+    return;
+  }
+
+  int w=(ea-pa)/3+1;
+  int h=(eb-pb)/3+1;
+
+  int i,j;
+  ws.reserve(w*h*3);
+  double *&mF(ws.mF);
+
+/*
+  for (i=0; i<w; ++i){
+    for (j=0; j<h; ++j){
+      mF[i*h*3+j*3]=-1.0e100l;
+      mF[i*h*3+j*3+1]=-1.0e100l;
+      mF[i*h*3+j*3+2]=-1.0e100l;
+    }
+  }
+*/
+
+  for (i=0; i<w; ++i){
+    mF[i*h*3]=-1.0e100l;
+    mF[i*h*3+1]=-pas.gapopen-i*pas.gapext;
+    mF[i*h*3+2]=-1.0e100l;
+  }
+  for (j=0; j<h; ++j){
+    mF[j*3]=-1.0e100l;
+    mF[j*3+1]=-1.0e100l;
+    mF[j*3+2]=-pas.gapopen-j*pas.gapext;
+  }
+  mF[0]=0.0l;
+  mF[1]=-1.0e100l;
+  mF[2]=-1.0e100l;
+  double bscore=0.0l,tmpbs;
+  long bi=0l,bj=0l;
+  long j0=1l,j1=h;
+
+  uint64_t ca,cb;
+  for (i=1; i<w; ++i){
+//    ca=(psa[(ea-i*3)/32u]>>(((ea-i*3)%32u)*2ul))&0x3Fu;
+    ca=codon2prot[seqpkmer(a,ea-i*3)&0x3Fu];
+    if (j0>1) { mF[i*h*3+(j0-1)*3]=-1.0e100l; mF[i*h*3+(j0-1)*3+1]=-1.0e100l; mF[i*h*3+(j0-1)*3+2]=-1.0e100l; }
+    for (j=j0; j<h; ++j) {
+//      cb=codon2prot[(psb[(eb-j*3)/32u]>>(((eb-j*3)%32u)*2ul))&0x3Fu];
+      cb=seqpkmer(b,eb-j*3)&0x3Fu;
+      if (j>j1) { mF[(i-1)*h*3+j0*3]=-1.0e100l; mF[(i-1)*h*3+j0*3+1]=-1.0e100l; mF[(i-1)*h*3+j0*3+2]=-1.0e100l; }
+      tmpbs=updateFNEG2(i,j,w,h,mF,pas.smatrix[ca*pas.smatrixwidth+cb],pas);
+      if (tmpbs<bscore-pas.dropoff){  // dropoff algorithm
+        if (j==j0) {
+          ++j0; // hit left edge, skip this position in next row
+        } else {
+          j1=j;
+          break; // hit right edge, skip next cells in this row
+        }
+      } else if (tmpbs>bscore) { // found better score
+        bscore=tmpbs;
+        bi=i; bj=j;
+      }
+    }
+    if (j0>j1+1) break; // no more computation needed
+  }
+
+
+  adata._score+=bscore;
+  if (adata.s1==-1 || adata.s1>ea-bi*3) adata.s1=ea-bi*3;
+  if (adata.s2==-1 || adata.s2>eb-bj*3) adata.s2=eb-bj*3;
+
+  aligned=0;
+  matches=0;
+
+
+  ealignprofile tmpprof;
+//  int ti=ea-(w-bi);
+  i=bi; j=bj;
+  int countgaps=0;
+  while (i>0 && j>0){
+    ca=codon2prot[seqpkmer(a,ea-i*3)&0x3Fu];
+    cb=seqpkmer(b,eb-j*3)&0x3Fu;
+//    ca=(psa[(ea-i*3)/32u]>>(((ea-i*3)%32u)*2ul))&0x3Fu;
+//    cb=codon2prot[(psb[(eb-j*3)/32u]>>(((eb-j*3)%32u)*2ul))&0x3Fu];
+    switch (maxv3(mF[i*h*3+j*3],mF[i*h*3+j*3+1],mF[i*h*3+j*3+2])){
+      case 0: countgaps=1; ++aligned; if (ca==cb) { ++matches; tmpprof.add(AT_MATCH); } else if (pas.smatrix[ca*pas.smatrixwidth+cb]>0){ ++matches; tmpprof.add(AT_COMPAT); }  else tmpprof.add(AT_MISS); --j; --i; break;
+      case 1: --i; gaps+=countgaps; tmpprof.add(AT_INS); break;
+      case 2: --j; gaps+=countgaps; tmpprof.add(AT_DEL); break;
+     default:
+      ldie("unknown code");
+    }
+  }
+  for (;i>0 && countgaps; --i){
+    ++gaps;
+    adata.profile.add(AT_INS);
+  }
+  for (;j>0 && countgaps; --j){
+    ++gaps;
+    adata.profile.add(AT_DEL);
+  }
+
+  adata.matches+=matches;
+  adata.mismatches+=aligned-matches;
+  adata.gaps+=gaps;
+  adata.profile.addinv(tmpprof); // add inverted profile
+}
+
+void pseqcalign_local_rightext(const eseq& a,long pa,long ea,const eseq& b,long pb,long eb,ealigndata& adata,ealignws& ws,const epalignscore& pas)
+{
+  uint64_t *psa=reinterpret_cast<uint64_t*>(a.seq._str),*psb=reinterpret_cast<uint64_t*>(b.seq._str);
+//  float mc_score[4]={as.match,-as.mismatch,-as.mismatch,-as.mismatch};
+  float score=0;
+  int aligned=0,gaps=0,matches=0,mismatches=0;
+  long maxsize=MAX(ea-pa,eb-pb);
+  long minsize=MIN(ea-pa,eb-pb);
+  ldieif((ea-pa)%3!=0 || (eb-pb)%3!=0,"not codon aligned"+estr(pa)+" "+estr(ea)+" "+estr(ea-pa)+" "+estr(pb)+" "+estr(eb)+" "+estr(eb-pb));
+
+  if (minsize==0) {
+    if (adata.e1==-1 || adata.e1<pa) adata.e1=pa;
+    if (adata.e2==-1 || adata.e2<pb) adata.e2=pb;
+    return;
+  }
+
+  int w=(ea-pa)/3+1;
+  int h=(eb-pb)/3+1;
+
+  int i,j;
+  ws.reserve(w*h*3);
+  double *&mF(ws.mF);
+
+/*
+  for (i=0; i<w; ++i){
+    for (j=0; j<h; ++j){
+      mF[i*h*3+j*3]=-1.0e100l;
+      mF[i*h*3+j*3+1]=-1.0e100l;
+      mF[i*h*3+j*3+2]=-1.0e100l;
+    }
+  }
+*/
+
+  for (i=0; i<w; ++i){
+    mF[i*h*3]=-1.0e100l;
+    mF[i*h*3+1]=-pas.gapopen-i*pas.gapext;
+    mF[i*h*3+2]=-1.0e100l;
+  }
+  for (j=0; j<h; ++j){
+    mF[j*3]=-1.0e100l;
+    mF[j*3+1]=-1.0e100l;
+    mF[j*3+2]=-pas.gapopen-j*pas.gapext;
+  }
+  mF[0]=0.0l;
+  mF[1]=-1.0e100l;
+  mF[2]=-1.0e100l;
+  double bscore=0.0l,tmpbs;
+  long bi=0l,bj=0l;
+  long j0=1l,j1=h;
+
+  uint64_t ca,cb;
+  for (i=1; i<w; ++i){
+//    ca=(psa[(i*3-3+pa)/32u]>>(((i*3-3+pa)%32u)*2ul))&0x3Fu;
+    ca=codon2prot[seqpkmer(a,i*3-3+pa)&0x3Fu];
+    if (j0>1) { mF[i*h*3+(j0-1)*3]=-1.0e100l; mF[i*h*3+(j0-1)*3+1]=-1.0e100l; mF[i*h*3+(j0-1)*3+2]=-1.0e100l; }
+    for (j=j0; j<h; ++j) {
+//      cb=codon2prot[(psb[(j*3-3+pb)/32u]>>(((j*3-3+pb)%32u)*2ul))&0x3Fu];
+      cb=seqpkmer(b,j*3-3+pb)&0x3Fu;
+      if (j>j1) { mF[(i-1)*h*3+j*3]=-1.0e100l; mF[(i-1)*h*3+j*3+1]=-1.0e100l; mF[(i-1)*h*3+j*3+2]=-1.0e100l; j1=j; }
+      tmpbs=updateFNEG2(i,j,w,h,mF,pas.smatrix[ca*pas.smatrixwidth+cb],pas);
+      if (tmpbs<bscore-pas.dropoff){  // dropoff algorithm   //TODO: need to initialize border when skipping rows and columns
+        if (j==j0) {
+          ++j0; // hit left edge, skip this postion in next row
+        } else {
+          j1=j;
+          break; // hit right edge, skip next cells in this row
+        }
+      } else 
+      if (tmpbs>bscore) { // found better score
+        bscore=tmpbs;
+        bi=i; bj=j;
+      }
+    }
+    if (j0>j1+1) break; // no more computation needed
+  }
+
+//  cout << "# bscore: " << bscore << " bi: " << bi << " bj: " << bj << endl;
+
+  if (adata.e1==-1 || adata.e1<pa+bi*3) adata.e1=pa+bi*3;
+  if (adata.e2==-1 || adata.e2<pb+bj*3) adata.e2=pb+bj*3;
+  adata._score+=bscore;
+
+  aligned=0;
+  matches=0;
+
+//  int tmpsa=0,tmpsb=0;
+//  int ti=ea-(w-bi);
+  i=bi; j=bj;
+  int countgaps=0;
+  while (i>0 && j>0){
+    ca=codon2prot[seqpkmer(a,i*3-3+pa)&0x3Fu];
+//    ca=(psa[(i*3-3+pa)/32u]>>(((i*3-3+pa)%32u)*2ul))&0x3Fu;
+    cb=seqpkmer(b,j*3-3+pb)&0x3Fu;
+//    cb=codon2prot[(psb[(j*3-3+pb)/32u]>>(((j*3-3+pb)%32u)*2ul))&0x3Fu];
+    switch (maxv3(mF[i*h*3+j*3],mF[i*h*3+j*3+1],mF[i*h*3+j*3+2])){
+      case 0: countgaps=1; ++aligned; if (ca==cb) { ++matches; adata.profile.add(AT_MATCH); } else if (pas.smatrix[ca*pas.smatrixwidth+cb]>0){ ++matches; adata.profile.add(AT_COMPAT); }  else adata.profile.add(AT_MISS); --j; --i; break;
+      case 1: --i; gaps+=countgaps; adata.profile.add(AT_INS); break;
+      case 2: --j; gaps+=countgaps; adata.profile.add(AT_DEL); break;
+     default:
+      ldie("unknown code");
+    }
+  }
+  for (;i>0 && countgaps>0; --i){
+    ++gaps;
+    adata.profile.add(AT_INS);
+  }
+  for (;j>0 && countgaps>0; --j){
+    ++gaps;
+    adata.profile.add(AT_DEL);
+  }
+
+//  if (adata.s1==-1 || adata.s1>pa) adata.s1=pa;
+//  if (adata.s2==-1 || adata.s2>pb) adata.s2=pb;
+//  if (adata.e1==-1 || adata.e1<ea) adata.e1=ea;
+//  if (adata.e2==-1 || adata.e2<eb) adata.e2=eb;
+  adata.matches+=matches;
+  adata.mismatches+=aligned-matches;
+  adata.gaps+=gaps;
+}
+
 
 
 
@@ -1548,6 +1899,84 @@ estr ealigndata::compress(const eseq& seq1)
 }
 
 
+estr ealigndata::palign_str(const eseq& seq1,const eseq& seq2)
+{
+  uint64_t *ps1=reinterpret_cast<uint64_t*>(seq1.seq._str),*ps2=reinterpret_cast<uint64_t*>(seq2.seq._str);
+  int i=0,j=s2;
+  ldieif(s2%3!=0,"not prot aligned: "+estr(s2));
+  estr str1,strs,str2;
+  eseq tmps;
+  if (revcompl)
+    tmps.setrevcompl(seq1,s1,e1);
+  else
+    tmps=seq1.subseq(s1,e1);
+  
+  cout << "seq1 prot: " << seq1.prot << endl;
+  cout << "seq2 prot: " << seq2.prot << endl;
+  uint32_t aa1,aa2;
+  for (int k=0; k<profile.elm.size(); ++k){
+    ealignelem& e(profile.elm[k]);
+    switch (e.type){
+      case AT_MATCH:
+        for (int l=0; l<e.count; ++l){
+          aa1=seqpkmer(tmps,i)&0x3Fu;
+          aa2=seqpkmer(seq2,j)&0x3Fu;
+          if (!seq1.prot) aa1=codon2prot[aa1];
+          if (!seq2.prot) aa2=codon2prot[aa2];
+          str1+=aa[aa1];
+          strs+='|';
+          str2+=aa[aa2];
+          i+=3; j+=3;
+        }
+       break;
+      case AT_COMPAT:
+        for (int l=0; l<e.count; ++l){
+          aa1=seqpkmer(tmps,i)&0x3Fu;
+          aa2=seqpkmer(seq2,j)&0x3Fu;
+          if (!seq1.prot) aa1=codon2prot[aa1];
+          if (!seq2.prot) aa2=codon2prot[aa2];
+          str1+=aa[aa1];
+          strs+='*';
+          str2+=aa[aa2];
+          i+=3; j+=3;
+        }
+       break;
+      case AT_MISS:
+        for (int l=0; l<e.count; ++l){
+          aa1=seqpkmer(tmps,i)&0x3Fu;
+          aa2=seqpkmer(seq2,j)&0x3Fu;
+          if (!seq1.prot) aa1=codon2prot[aa1];
+          if (!seq2.prot) aa2=codon2prot[aa2];
+          str1+=aa[aa1];
+          strs+=' ';
+          str2+=aa[aa2];
+          i+=3; j+=3;
+        }
+       break;
+      case AT_DEL:
+        for (int l=0; l<e.count; ++l){
+          aa2=seqpkmer(seq2,j)&0x3Fu;
+          if (!seq2.prot) aa2=codon2prot[aa2];
+          str1+='-';
+          strs+=' ';
+          str2+=aa[aa2];
+          j+=3;
+        }
+       break;
+      case AT_INS:
+        for (int l=0; l<e.count; ++l){
+          aa1=seqpkmer(tmps,i)&0x3Fu;
+          if (!seq1.prot) aa1=codon2prot[aa1];
+          str1+=aa[aa1];
+          strs+=' ';
+          str2+='-';
+          i+=3;
+        }
+       break;
+    }
+  }
+  return(str1+"\n"+strs+"\n"+str2);
+}
 
 estr ealigndata::align_str(const eseq& seq1,const eseq& seq2)
 {

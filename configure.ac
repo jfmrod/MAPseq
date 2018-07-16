@@ -82,6 +82,7 @@ AM_CONDITIONAL(USE_SYSEUTILS, test "x$with_syseutils" = "xyes")
 AC_ARG_ENABLE([makestatic], [  --enable-makestatic    compile statically linked executable. ],[enable_makestatic=$enableval],[enable_makestatic=no])
 if test "x$enable_makestatic" = "xyes"; then
   AC_MSG_NOTICE([Enabling static compilation])
+#  LDFLAGS="${LDFLAGS} -Wl,-Bstatic"
   LDFLAGS="${LDFLAGS} -all-static"
 fi
 
