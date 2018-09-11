@@ -78,6 +78,10 @@ int minid1=1;
 int minid2=1;
 int otulim=50;
 float lambda=1.280;
+
+float swmin=0.05;
+float swmax=0.3;
+
 float sweight=30.0;
 float sweightabs=0.1;
 
@@ -4677,7 +4681,8 @@ void taxScore(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,e
 
 //  float sw=sweightabs; //MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
 //  float sw=MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
-  float sw=MAX(0.05,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+
+  float sw=MAX(swmin,MIN(swmax,(swmax-MAX(0.0,(log(slen)-log(80.0)))*(swmax-swmin)/(log(500.0)-log(80.0)))));
 
   mcfarr.init(ptax.size(),0.0);
   if(tax.seqs[adata.seqid]==0x00)
@@ -4726,7 +4731,8 @@ void taxScoreSum(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<
 //    taxcounts[i].init(tax.names[i].size(),-1);
 
 //  float sw=MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
-  float sw=MAX(0.05,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+//  float sw=MAX(0.05,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+  float sw=MAX(swmin,MIN(swmax,(swmax-MAX(0.0,(log(slen)-log(80.0)))*(swmax-swmin)/(log(500.0)-log(80.0)))));
 //  float sw=sweightabs; // MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
 
   for (int l=pinfo.matchcounts.size()-1; l>=0; --l){
@@ -4884,6 +4890,11 @@ void load_taxa(const estr& taxfile,eseqdb& db)
           tax.cutoff.add(parts2[0].f());
           tax.cutoffcoef.add(parts2[1].f());
         }
+      }else if (parts[0]=="#sweight:" && parts.size()>1){
+	if (parts.size()>1)
+           swmin=parts[1].f();
+        if (parts.size()>2)
+           swmax=parts[2].f();
       }else if (parts[0]=="#name:" && parts.size()>1){
         tax.name=parts[1];
       }else if (parts[0]=="#levels:" && parts.size()>1){
@@ -6808,6 +6819,7 @@ void saveTaxonomy(eseqdb& db,etax& tax,const estr& fname)
   }
   f.write(tmpstr);
   tmpstr.clear();
+/*
   for (int i=0; i<tax.names.size(); ++i){
     serialint(tax.names[i].size(),tmpstr);
     for (int j=0; j<tax.names[i].size(); ++j)
@@ -6815,8 +6827,26 @@ void saveTaxonomy(eseqdb& db,etax& tax,const estr& fname)
   }
   f.write(tmpstr);
   tmpstr.clear();
-  for (int i=0; i<db.seqs.size(); ++i){
-    
+*/
+  int staxcount=0;
+  for (int i=0; i<tax.seqs.size(); ++i){
+    if (tax.seqs[i]==0x00) continue;
+    ++staxcount;
+  }
+  serialint(staxcount,tmpstr);
+  f.write(tmpstr);
+  tmpstr.clear();
+  for (int i=0; i<tax.seqs.size(); ++i){
+    if (tax.seqs[i]==0x00) continue;
+    serialint(i,tmpstr);
+    eseqtax &stax(*tax.seqs[i]);
+    serialfloat(stax.bid,tmpstr);
+    for (int j=0; j<stax.tl.size(); ++j){
+      serialint(stax.tl[j].tid,tmpstr);
+      serialfloat(stax.tl[j].cf,tmpstr);
+    }
+    f.write(tmpstr);
+    tmpstr.clear();
   }
   f.close();
 }
@@ -6826,16 +6856,18 @@ void loadTaxonomyBinary(eseqdb& db,const estr& fname)
   efile f;
   f.open(fname,"r");
   estr tmpstr;
+  tmpstr.reserve(100000000);
   long si=0,tsi;
   f.read(tmpstr,100000000);
 
   etax tax;
   tsi=tax.name.unserial(tmpstr,si);
-  ldieif(tsi==-1,"error unserializing names");
+  ldieif(tsi==-1,"error unserializing name");
   si=tsi;
   int len,len2;
   si=unserialint(len,tmpstr,si);
   ldieif(si==-1,"error unserializing size");
+  cout << "reading levels: " << len << endl;
   tax.levels.init(len);
   for (int i=0; i<len; ++i){
     si=tax.levels[i].unserial(tmpstr,si);
@@ -6843,6 +6875,7 @@ void loadTaxonomyBinary(eseqdb& db,const estr& fname)
   }
   si=unserialint(len,tmpstr,si);
   ldieif(si==-1,"error unserializing size");
+  cout << "reading names: " << len << endl;
   tax.names.init(len);
   for (int i=0; i<len; ++i){
     si=unserialint(len2,tmpstr,si);
@@ -6852,6 +6885,27 @@ void loadTaxonomyBinary(eseqdb& db,const estr& fname)
       si=tax.names[i][j].unserial(tmpstr,si);
       ldieif(si==-1,"error unserializing name items");
     }
+  }
+  si=unserialint(len,tmpstr,si);
+  ldieif(si==-1,"error unserializing size");
+  tax.seqs.init(db.seqs.size(),0x00);
+  int seqi,tid;
+  float bid,cf;
+  eseqtax *stax;
+  cout << "reading seqtax: " << len << endl;
+  for (int i=0; i<len; ++i){
+    si=unserialint(seqi,tmpstr,si);
+    si=unserialfloat(bid,tmpstr,si);
+    ldieif(si==-1 || seqi<0 || seqi>=db.seqs.size(),"error loading taxonomy in binary format, si: "+estr(si)+" seqi: "+estr(seqi));
+    stax=new eseqtax();
+    stax->bid=bid;
+    for (int j=0; j<tax.levels.size(); ++j){
+      si=unserialint(seqi,tmpstr,si);
+      si=unserialfloat(cf,tmpstr,si);
+      ldieif(si==-1,"error loading taxonomy in binary format, si: "+estr(si));
+      stax->tl.add(eseqtaxlevel(tid,cf));
+    }
+    tax.seqs[seqi]=stax;
   }
   db.taxa.add(tax);
   f.close();
@@ -7096,7 +7150,7 @@ estr mapseq(const estr& seq,eseqdb& db,estrhash& sids)
     taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax,s.seqlen);
    
     if (ptax.size()>3){
-      outstr+=",\"taxa\":\""+tax.names[0].at(ptax.keys(0))+";"+tax.names[1].at(ptax.keys(1))+";"+tax.names[2].at(ptax.keys(2))+";"+tax.names[3].at(ptax.keys(3))+"\",\"confidence\":"+ptax.values(3);
+      outstr+=",\"taxa\":\""+tax.names[0].at(ptax.keys(0))+";"+tax.names[1].at(ptax.keys(1))+";"+tax.names[2].at(ptax.keys(2))+";"+tax.names[3].at(ptax.keys(3))+"\",\"confidence\":"+mcfarr[3];
     }else{
       outstr+=",\"error\":\"unexpected number of taxa levels\"";
     }
@@ -7164,8 +7218,15 @@ void actionLoadTaxBinary()
 
   doInit();
 
+//  nocluster=true;
+
   eseqdb db;
-  loadTaxonomyBinary(db,getParser().args[1]);
+  loadSequencesBinary(db,getParser().args[1]);
+  cerr << "# seqs laoded: " << db.seqs.size() << endl;
+  initDB(db,1);
+  cerr << "# init db done" << endl;
+
+  loadTaxonomyBinary(db,getParser().args[2]);
   cerr << "# taxonomies: " << db.taxa.size() << endl;
   for (int i=0; i<db.taxa.size(); ++i){
     cerr << "# tax levels: " << db.taxa[i].names.size() << endl;
@@ -7302,6 +7363,8 @@ int emain()
   initdlt();
   epregister(sweight);
   epregister(sweightabs);
+  epregister(swmin);
+  epregister(swmax);
   epregister(nocluster);
   epregister(otulim);
   epregister(lambda);
