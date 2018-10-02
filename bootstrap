@@ -4,6 +4,10 @@ cp README.md README
 if [ ! -d "libs/eutils" ]; then
   mkdir -p libs
   svn co https://www.konceptfx.com/svn/eutils libs/eutils
+else
+  pushd libs/eutils
+  svn update
+  popd
 fi
 aclocal -I m4 && autoconf -f -i -Im4 && autoheader && automake -a
 autoreconf -vfi -I m4

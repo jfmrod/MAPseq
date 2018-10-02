@@ -1,5 +1,5 @@
 
-# MAPseq v1.2.2 (30 Oct 2017)
+# MAPseq v1.2.3 (2 Oct 2018)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -142,6 +142,10 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+1.2.3 (2 Oct 2018)
+- Fixed last sequence of database not loading if it missed a newline. Added assert for empty sequences in database.
+- Fixed double line output for the same query sequence with long queries (>1200bp). Only the highest scoring hit is reported now.
+
 1.2.2 (30 Oct 2017)
 - Fixed multithreaded race condition causing issues on some systems.
 

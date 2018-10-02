@@ -3712,84 +3712,88 @@ void taskSeqsearch()
       if (pinfoarr.size()==0) continue;
 //      if (pinfo.tophit.seqid<0) continue;
   
-      for (int pi=0; pi<pinfoarr.size(); ++pi){
-        epredinfo& pinfo(pinfoarr[pi]);
-        float taxcutoffmin=pinfo.matchcounts[0].identity();
-        float bid=pinfo.tophit.identity();
-        if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
-          eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
-          // adjust id to closest gold hit
-  //        if (tmptaxhit.bid>0.0) bid=tmptaxhit.bid*bid;
-          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
-        }
+      epredinfo *topinfo=&pinfoarr[0];
+      for (int pi=1; pi<pinfoarr.size(); ++pi){
+        if (pinfoarr[pi].tophit.score()>topinfo->tophit.score()) topinfo=&pinfoarr[pi];
+      }
+
+      epredinfo& pinfo(*topinfo);
+      float taxcutoffmin=pinfo.matchcounts[0].identity();
+      float bid=pinfo.tophit.identity();
+      if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+        eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
+        // adjust id to closest gold hit
+//        if (tmptaxhit.bid>0.0) bid=tmptaxhit.bid*bid;
+        if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+      }
       
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
   
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
-        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+      outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
        
-        if (mtdata.seqdb->taxa.size()==0){
-          double topscore=pinfo.tophit.score();
-          double tscore=0.0;
-          for (int t=0; t<pinfo.matchcounts.size(); ++t)
-            tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
-           outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+      if (mtdata.seqdb->taxa.size()==0){
+        double topscore=pinfo.tophit.score();
+        double tscore=0.0;
+        for (int t=0; t<pinfo.matchcounts.size(); ++t)
+          tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
+         outstr+="\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+      }
+
+      for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+        etax& tax(mtdata.seqdb->taxa.at(t));
+    
+        earrayof<double,int> ptax;
+        taxscore(ptax,pinfo,tax,searchws.taxcounts);
+    
+        bid=pinfo.tophit.identity();
+        if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]!=0x00){
+          eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]);
+          // adjust id to closest gold hit
+//          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+//          if (tmptaxhit.bid>0.0) bid=0.5*(bid<tmptaxhit.bid?bid:tmptaxhit.bid)+0.5*bid*tmptaxhit.bid; 
+          if (tmptaxhit.bid>0.0) {
+            bid=bid*tmptaxhit.bid;
+            for (int l=0; l<ptax.size(); ++l)
+              ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
+//            if (ptax.values(l)>tmptaxhit.tl[l].cf) ptax.values(l)=tmptaxhit.tl[l].cf;
+//          ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
+          }
         }
 
-        for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
-          etax& tax(mtdata.seqdb->taxa.at(t));
-      
-          earrayof<double,int> ptax;
-          taxscore(ptax,pinfo,tax,searchws.taxcounts);
-      
-          bid=pinfo.tophit.identity();
-          if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]!=0x00){
-            eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(t).seqs[pinfo.tophit.seqid]);
-            // adjust id to closest gold hit
-  //          if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
-  //          if (tmptaxhit.bid>0.0) bid=0.5*(bid<tmptaxhit.bid?bid:tmptaxhit.bid)+0.5*bid*tmptaxhit.bid; 
-            if (tmptaxhit.bid>0.0) {
-              bid=bid*tmptaxhit.bid;
-              for (int l=0; l<ptax.size(); ++l)
-                ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
-  //            if (ptax.values(l)>tmptaxhit.tl[l].cf) ptax.values(l)=tmptaxhit.tl[l].cf;
-  //          ptax.values(l)=ptax.values(l)*tmptaxhit.tl[l].cf;
-            }
+/*
+        efloatarray taxcutoff;
+        if (mtdata.noveltaxa){
+          taxcutoff.init(tax.names.size(),0.0);
+          if (pinfo2.matchcounts.size()>0)
+            findtaxcutoff(taxcutoff,pinfo2,ptax,tax);
+        }
+*/
+    
+//        int hitlen=pinfo.tophit.e2-pinfo.tophit.s2;
+   
+        efloatarray mcfarr;
+        mcfarr.init(ptax.size());
+        float lastmcf=0.0;
+        //  adjust computed confidences
+        for (int l=MIN(ptax.size(),tax.names.size())-1; l>=0; --l){
+          ldieif(ptax.keys(l)!=-1 && ptax.keys(l)>=tax.names[l].size(),"key out of tax: "+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+" "+estr(l)+" "+ptax.keys(l)+" "+tax.names[l].size());
+          mcfarr[l]=ptax.values(l);
+
+          // if both fixed thresholds and precalculated identity thresholds exist, mix both in 3:1 ratio
+          if (tax.cutoff.size()>0){ // if only fixed id threshold exists
+            float ncf=(bid-tax.cutoff[l]+0.02)/tax.cutoffcoef[l];
+            mcfarr[l]=ncf<ptax.values(l)?ncf:ptax.values(l);
           }
-  
-  /*
-          efloatarray taxcutoff;
-          if (mtdata.noveltaxa){
-            taxcutoff.init(tax.names.size(),0.0);
-            if (pinfo2.matchcounts.size()>0)
-              findtaxcutoff(taxcutoff,pinfo2,ptax,tax);
-          }
-  */
-      
-  //        int hitlen=pinfo.tophit.e2-pinfo.tophit.s2;
-     
-          efloatarray mcfarr;
-          mcfarr.init(ptax.size());
-          float lastmcf=0.0;
-          //  adjust computed confidences
-          for (int l=MIN(ptax.size(),tax.names.size())-1; l>=0; --l){
-            ldieif(ptax.keys(l)!=-1 && ptax.keys(l)>=tax.names[l].size(),"key out of tax: "+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+" "+estr(l)+" "+ptax.keys(l)+" "+tax.names[l].size());
-            mcfarr[l]=ptax.values(l);
-  
-            // if both fixed thresholds and precalculated identity thresholds exist, mix both in 3:1 ratio
-            if (tax.cutoff.size()>0){ // if only fixed id threshold exists
-              float ncf=(bid-tax.cutoff[l]+0.02)/tax.cutoffcoef[l];
-              mcfarr[l]=ncf<ptax.values(l)?ncf:ptax.values(l);
-            }
-  //            mcf=ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
-  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.05;
-  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.1;
-  //            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
-  
-            if (mcfarr[l]>1.0) mcfarr[l]=1.0; else if (mcfarr[l]<0.0) mcfarr[l]=0.0;
-            if (mcfarr[l]<lastmcf) mcfarr[l]=lastmcf;  // do not let confidences get smaller
-            lastmcf=mcfarr[l];
-          }
+//            mcf=ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
+//            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.05;
+//            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.1;
+//            mcf=0.5*ptax.values(l)+0.5*(bid-adjcutoff+0.02)/0.2;
+
+          if (mcfarr[l]>1.0) mcfarr[l]=1.0; else if (mcfarr[l]<0.0) mcfarr[l]=0.0;
+          if (mcfarr[l]<lastmcf) mcfarr[l]=lastmcf;  // do not let confidences get smaller
+          lastmcf=mcfarr[l];
+        }
 
 /*      
           for (int l=0; l<ptax.size() && l<tax.names.size(); ++l){
@@ -3797,31 +3801,31 @@ void taskSeqsearch()
             outstr+=estr("\t")+(ptax.keys(l)==-1?estr("NA"):tax.names[l].values(ptax.keys(l)))+"\t"+mcfarr[l]+"\t"+ptax.values(l);
           }
 */
-          outstr+="\t";
-          outstr+=outfmt.value()(tax,ptax,mcfarr);
-          outstr+="\t";
+        outstr+="\t";
+        outstr+=outfmt.value()(tax,ptax,mcfarr);
+        outstr+="\t";
+      }
+      outstr+="\n";
+      if (mtdata.print_hits){
+        outstr+="#\t";
+        etax& tax(mtdata.seqdb->taxa.at(0));
+        for (int l=pinfo.matchcounts.size()-1; l>0; --l){
+          ealigndata& adata(pinfo.matchcounts[l]);
+//          outstr+="# "+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+adata.s2+"\t"+adata.e2+"\t"+tax2str(mtdata,adata.seqid)+"\n";
+          outstr+=mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.kmercount+"\t";
         }
         outstr+="\n";
-        if (mtdata.print_hits){
-          outstr+="#\t";
-          etax& tax(mtdata.seqdb->taxa.at(0));
-          for (int l=pinfo.matchcounts.size()-1; l>0; --l){
-            ealigndata& adata(pinfo.matchcounts[l]);
-  //          outstr+="# "+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+adata.s2+"\t"+adata.e2+"\t"+tax2str(mtdata,adata.seqid)+"\n";
-            outstr+=mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.kmercount+"\t";
-          }
-          outstr+="\n";
-        }
-  //      outstr+=pinfo.tophit.profile.str() + "\n";
-        if (mtdata.print_align){
-          pinfo.tophit.profile.inv();
-          outstr+=pinfo.tophit.profile.str() + "\n";
-          outstr+=pinfo.tophit.align_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
-          outstr+="\n";
-        }
-        mtdata.m.lock();
-        cout << outstr; outstr.clear();
-        mtdata.m.unlock();
+      }
+//      outstr+=pinfo.tophit.profile.str() + "\n";
+      if (mtdata.print_align){
+        pinfo.tophit.profile.inv();
+        outstr+=pinfo.tophit.profile.str() + "\n";
+        outstr+=pinfo.tophit.align_str(s,mtdata.seqdb->seqs.values(pinfo.tophit.seqid));
+        outstr+="\n";
+      }
+      mtdata.m.lock();
+      cout << outstr; outstr.clear();
+      mtdata.m.unlock();
 
 //      if (pinfo.tophit.pair)
 //        outstr+=estr("#pair: ")+pinfo.tophit.pair->score()+"\t"+pinfo.tophit.pair->identity()+"\t"+pinfo.tophit.pair->matches+"\t"+pinfo.tophit.pair->mismatches+"\t"+pinfo.tophit.pair->gaps+"\t"+pinfo.tophit.pair->s2+"\t"+pinfo.tophit.pair->e2+"\n";
@@ -3842,7 +3846,6 @@ void taskSeqsearch()
         outstr+="\n";
       }
 */
-      }
     }
 
     mtdata.m.lock();
