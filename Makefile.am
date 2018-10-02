@@ -6,8 +6,8 @@ DIST_SUBDIRS=$(subdirs)
 AM_CXXFLAGS=-DDATAPATH='"$(datadir)/mapseq"'
 
 if !USE_SYSEUTILS
-  LDADD=eutils/libeutils.la
-  AM_CXXFLAGS+= -I$(srcdir)/eutils
+  LDADD=libs/eutils/libeutils.la
+  AM_CXXFLAGS+= -I$(srcdir)/libs/eutils
 #  AM_CXXFLAGS+= -Ilibs
 endif
 

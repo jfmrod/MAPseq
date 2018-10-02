@@ -3605,7 +3605,7 @@ void load_taxa(const estr& taxfile,eseqdb& db)
     }
   }
   if (tax.name.len()==0)
-    tax.name=basename(taxfile);
+    tax.name=::basename(taxfile);
   lwarnif(notfound>0,"loading taxonomy, "+estr(notfound)+" sequences not found in sequence database");
   f.close();
 }
@@ -4043,6 +4043,7 @@ int emain()
     if (i!=-1l) str2id.del(i); // only keep id up to first white space
     if (dbfilter.len() && str2id!=dbfilter) continue;
 
+    ldieif(str2seq.len()==0,"Empty sequence in database: "+str2id);
     db.seqind.add(str2id,db.seqs.size());
     db.seqs.add(str2id,eseq(str2seq));
 

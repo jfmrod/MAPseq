@@ -1,5 +1,10 @@
 #!/bin/bash
 
+cp README.md README
+if [ ! -d "libs/eutils" ]; then
+  mkdir -p libs
+  svn co https://www.konceptfx.com/svn/eutils libs/eutils
+fi
 aclocal -I m4 && autoconf -f -i -Im4 && autoheader && automake -a
 autoreconf -vfi -I m4
 #pushd eutils  # not needed because autoreconf automatically does it

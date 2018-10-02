@@ -46,7 +46,7 @@ case "${host_os}" in
 
 AC_ARG_WITH(syseutils,[AS_HELP_STRING([--with-syseutils],[Use system installed eutils.])],,with_syseutils=no)
 if test "x$with_syseutils" = "xno"; then
-  AC_CONFIG_SUBDIRS([eutils])
+  AC_CONFIG_SUBDIRS([libs/eutils])
 else
   AM_PATH_EUTILS
   if test "x$no_eutils" = "xyes"; then
@@ -57,7 +57,7 @@ else
   fi
   LIBS="${LIBS} ${EUTILS_LIBS}"
 fi
-AM_CONDITIONAL(USE_SYSEUTILS, test "x$with_syseutils" = "xyes")
+AM_CONDITIONAL(USE_SYSEUTILS, test ! "x$with_syseutils" = "xno")
 
 
 #AM_INIT_AUTOMAKE("mapseq","1.0.0")
