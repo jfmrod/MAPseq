@@ -7,14 +7,14 @@ AM_CXXFLAGS=-DDATAPATH='"$(datadir)/mapseq"'
 
 if !USE_SYSEUTILS
   LDADD=libs/eutils/libeutils.la
-  AM_CXXFLAGS+= -I$(srcdir)/libs/eutils
+  AM_CXXFLAGS+= -I$(srcdir)/libs
 #  AM_CXXFLAGS+= -Ilibs
 endif
 
 #TESTS=tests/simple.sh
 
 #mapref_files=data/mapref.fna.ltps119tax data/mapref.fna data/mapref.fna.mscluster data/mapref.fna.ncbitax data/mapref.fna.otutax # data/mapref.gold.fasta data/mapref.gold.fasta.tax
-mapref_files=data/mapref-2.2.fna data/mapref-2.2.fna.mscluster data/mapref-2.2.fna.ncbitax data/mapref-2.2.fna.otutax # data/mapref.gold.fasta data/mapref.gold.fasta.tax
+mapref_files=data/mapref-2.2b.fna data/mapref-2.2b.fna.mscluster data/mapref-2.2b.fna.ncbitax data/mapref-2.2b.fna.otutax # data/mapref.gold.fasta data/mapref.gold.fasta.tax
 
 #noinst_LIBRARIES=libmapseqali.a
 #libmapseqali_a_SOURCES=eseqali.h eseqali.cpp eseq.h eseq.cpp
