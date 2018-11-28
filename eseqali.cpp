@@ -568,7 +568,7 @@ float seqcalign_global(const eseq& a,int pa,int ea,const eseq& b,int pb,int eb,e
 float seqcalign(const eseq& a,int pa,int ea,const eseq& b,int pb,int eb,estr& as1,estr& as2)
 {
   uint64_t *psa=reinterpret_cast<uint64_t*>(a.seq._str),*psb=reinterpret_cast<uint64_t*>(b.seq._str);
-  char mc_score[4]={match,-penalty,-penalty,-penalty};
+  float mc_score[4]={match,-penalty,-penalty,-penalty};
   float score=0;
   int aligned=0,gaps=0,matches=0,mismatches=0;
   int maxsize=MAX(ea-pa,eb-pb);
@@ -1468,6 +1468,7 @@ estr ealigndata::align_str(const eseq& seq1,const eseq& seq2)
           ++i;
         }
        break;
+      default:{}
     }
   }
   return(str1+"\n"+strs+"\n"+str2);

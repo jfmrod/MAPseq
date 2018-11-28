@@ -8,7 +8,7 @@ unset C_INCLUDE_PATH
 unset OBJC_INCLUDE_PATH
 unset OBJCPLUS_INCLUDE_PATH
 
-./configure --enable-static --prefix=/Users/joao/work/libdev/mapseq/mapseq-1.1-macosx --bindir=/Users/joao/work/libdev/mapseq/mapseq-1.1-macosx
+./configure --enable-makestatic --prefix=`pwd`/mapseq-1.2.3-macosx --bindir=`pwd`/mapseq-1.2.3-macosx CXXFLAGS="-O2"
 
 
 #install_name_tool -change '/Users/joao/work/libdev/mapseq/mapseq-1.0-bin/lib/libeutils-1.0.dylib' '@loader_path/lib/libeutils-1.0.dylib' mapseq-1.0-bin/mapseq
