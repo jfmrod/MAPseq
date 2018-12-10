@@ -79,6 +79,8 @@ int minid2=1;
 int otulim=50;
 float lambda=1.280;
 
+bool galign=false;
+
 float swmin=0.05;
 float swmax=0.3;
 
@@ -456,9 +458,6 @@ void seqident_seg_left(const eseq& s1,int p1,const eseq& s2,int p2,ealigndata& a
   mismatches+=IKMERSIZE-tmp[0];
 */
 }
-
-
-bool galign=true;
 
 
 inline void sumcounts(unsigned char* tncount,int p1,uint64_t tmpnuc)
@@ -2469,6 +2468,110 @@ void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray&
 }
 
 
+void seqident_global(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+{
+  if (s1_end==0) s1_end=s1.seqlen;
+  long s1_len=s1_end-s1_start;
+
+//  for (int i=0; i<11; ++i)
+//    match[i]=0;
+  adata.matches=0; adata.mismatches=0; adata.gaps=0; adata._score=0.0;
+  adata.s1=-1; adata.e1=-1;
+  adata.s2=-1; adata.e2=-1;
+
+  char tmp[5];
+  char itmp;
+  ebasicarray<ediag> diags;
+
+  LDEBUG(D_PROFILE,t2.reset());
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
+
+  if (diags.size()==0){
+//    lderror("no shared segments found");
+    return;
+  }
+
+  ediag *bestseg=sparse_dynamic_prog(diags,as);
+  LDEBUG(D_PROFILE,tdp2=tdp2*0.99+t2.lap()*0.01);
+
+//  estr fas1,fas2;
+//  cout << "full alignment" << endl;
+//  cout << "ali: " << 0 <<","<<s2.seqlen<<" : " << 0 <<","<<s1.seqlen << endl; 
+//  adata._score=seqcalign_global_noedgegap(s1,0,s1.seqlen,s2,0,s2.seqlen,fas1,fas2);
+//  print_seqali(fas1,fas2);
+
+//  estr pas1,pas2;
+//  seqident_seg_local(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,tncounts);
+//  seqident_seg_sw_right(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,tncounts);
+//  estr as1,as2;
+//  seqcalign_global_noedgegap(s1,0,s1.seqlen,s2,0,s2.seqlen,as1,as2);
+//  print_seqali(as1,as2);
+
+/*  
+  if (bestseg->bestseg==0x00){ // single segment hit, do full alignment
+    seqcalign_global_noedgegap(s1,0,s1.seqlen,s2,0,s2.seqlen,adata,sws.alignws,as);
+    return;
+  }
+*/
+
+
+  float tmpflanks=0.0;
+  ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2)+" s1 id: "+s1id+" s2 id: "+s2id);
+  long minright=MIN(s1.seqlen-bestseg->j,s2.seqlen-bestseg->j2);
+//  seqcalign_global_norightedgegap(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,alignws);
+  seqcalign_global(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,sws.alignws,as);
+  LDEBUG(D_PROFILE,tmpflanks+=t2.lap());
+  adata.profile.add(AT_RIGHT);
+  LDEBUG(D_SEQIDENT,cout << "rightid: " << bestseg->j << "," << s1_end << " l: " << s1_end-bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+  while (bestseg!=0x00 && bestseg->bestseg != 0x00){
+    seqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,as);
+    adata.profile.add(AT_ID);
+    LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+    long gapdiff=abs((bestseg->bestseg->i-bestseg->bestseg->i2)-(bestseg->i-bestseg->i2));
+//    if (gapdiff==0) {/* fast alignment no gaps */
+//      seqident_seg_nogaps(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,as);
+//      adata.profile.add(AT_ALIGNF);
+//    } else { /* full sw alignment */
+      seqcalign_global(s1,bestseg->bestseg->j,bestseg->i,s2,bestseg->bestseg->j2,bestseg->i2,adata,sws.alignws,as);
+      adata.profile.add(AT_ALIGN);
+//    }
+    LDEBUG(D_SEQIDENT,cout << "segid: " << bestseg->bestseg->j << "," << bestseg->i << " l: " << bestseg->i-bestseg->bestseg->j << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << " gapdiff: " << gapdiff << endl);
+    LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//    cout << "segid: " << bestseg->i << "," << bestseg->j << " l: " << bestseg->j-bestseg->i << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl;
+    bestseg=bestseg->bestseg;
+  }
+  seqncount(s1,bestseg->i,bestseg->j,s2,bestseg->i2,bestseg->j2,adata,as);
+  adata.profile.add(AT_ID);
+  LDEBUG(D_SEQIDENT,cout << "seg: "<< bestseg->i << "," << bestseg->j << " l: " << (bestseg->j-bestseg->i) << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+
+
+  
+  LDEBUG(D_PROFILE,tdpmd=tdpmd*0.99+t2.lap()*0.01);
+//  seqident_seg_left_local(s1,bestseg->i,s2,bestseg->i2,adata,tncounts);
+  long minleft=MIN(bestseg->i,bestseg->i2);
+  adata.s1=bestseg->i; adata.s2=bestseg->i2;
+  seqcalign_global(s1,0,bestseg->i,s2,0,bestseg->i2,adata,sws.alignws,as);
+  adata.profile.add(AT_LEFT);
+  LDEBUG(D_PROFILE,tmpflanks+=t2.lap());
+  tdpfl=tdpfl*0.99+tmpflanks*0.01;
+
+//  estr as1,as2;
+//  seqcalign_global_noleftedgegap(s1,0,bestseg->i,s2,0,bestseg->i2,as1,as2);
+//  cout << endl;
+//  cout << as1 << endl << as2 << endl;
+  LDEBUG(D_SEQIDENT,cout << "leftid: "<< bestseg->i << " l: " << (bestseg->i<bestseg->i2?bestseg->i:bestseg->i2) << " d: " << bestseg->i2-bestseg->i << " m: " << adata.matches << " miss: " << adata.mismatches << " gaps: " << adata.gaps << endl);
+  LDEBUG(D_SEQALIGNMENT,print_tncount(adata.aln,s1_start,s1_end));
+//  cout << "partial alignment" << endl;
+//  print_seqali(pas1,pas2);
+
+  return;
+}
+
+
 
 void kmercount_mask(estrarrayof<eseq>& seqs,eintarray& seqids,uint64_t *kmermask,unsigned int maskid,eintarray& idcount,unsigned int *akmers,unsigned long akmask)
 {
@@ -4379,6 +4482,267 @@ void findtaxcutoff(efloatarray& taxcutoff,epredinfo& pinfo2,earrayof<double,int>
 }
 
 
+void seqsearch_global(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws)
+{
+  t1.reset();
+  pinfoarr.clear();
+//  memset(sws.bitmask,0,((db.otus.size()*2)/64+1)*sizeof(uint64_t));
+//  kmercount_both(db.otus.size(),db.otukmers,s,sws.idcount2,sws.bitmask,akmers,0x0Fu);
+//  kmercount_both2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
+//  kmercount_both_nopos2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
+  for (long segi=0; segi<s.seqlen/SEQSEGSIZE+1; ++segi){
+    epredinfo pinfo;
+    long s_start=segi*SEQSEGSIZE;
+    long s_end=(s_start+SEQSEGSIZE<s.seqlen?s_start+SEQSEGSIZE:s.seqlen);
+    long s_len=s_end-s_start;
+//    int step=1;
+    int step=s_len/150+1;
+//    if (s_len<150) step=
+    eseq srev;
+    srev.setrevcompl(s,s_start,s_end);
+//    cout << "# " << str2id << " start: " << s_start << " end: " << s_end << " len: " << s_len << " seqlen: " << s.seqlen << " srev: " << srev.seqlen << endl;
+  
+    sws.otukmerpos.init(db.otus.size()*2,0);
+    sws.idcount.init(db.otus.size()*2,0);
+
+//    cout << "# counting" << endl;
+    kmercount_both_nopos2_skip(db.otus.size(),db.otukmers,s,s_start,s_end,sws.idcount,sws.otukmerpos,akmers,0x0Fu,step);
+    ti=ti*0.99+t1.lap()*0.01;
+  
+    eintarray best;
+  //  ebasicarray<ealigndata> matchcounts;
+  
+    // choosing sequences for kmercounting step
+  //  eintarray& best(sws.best);
+  //  eintarray bestcount;
+  //  best.clear();
+    int l;
+    for (l=0; l<sws.idcount.size(); ++l){
+  //    uint16_t bt=(sws.bitmask[l/64u]>>(l%64u))&0x1ul;
+      if (sws.idcount[l]>=minid1) { best.add(l); ++l; break; }
+    }
+    for (; l<sws.idcount.size(); ++l){
+  //    uint16_t bt=(sws.bitmask[l/64u]>>(l%64u))&0x1ul;
+      if (sws.idcount[l]<minid1 || (sws.idcount[l]<sws.idcount[best[best.size()-1]] && best.size()==3*topotus)) continue; // worst id than the bottom of the list
+  
+      int j;
+      for (j=0; j<best.size() && sws.idcount[l]<sws.idcount[best[j]]; ++j);
+  
+      if (best.size()<3*topotus)
+        best.add(l);
+      for (int tj=best.size()-1; tj>j; --tj)
+        best[tj]=best[tj-1];
+      best[j]=l;
+    }
+    if (best.size()==0) { // no overlap found to any seq group representatives
+      continue;
+//      pinfo.seqid=-2;
+//      return;
+    }
+    ts=ts*0.99+t1.lap()*0.01;
+
+    eintarray seqids;
+    for (int l=0; l<best.size() && l<topotus; ++l){
+      int ibest=best[l];
+      if (ibest<db.otus.size()){
+  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest][0]) << "\t" << idcount[ibest] << endl;
+        for (int l2=0; l2<db.otus[ibest].size() && (otulim==0 || l2<otulim); ++l2)
+          seqids.add(db.otus[ibest][l2]);
+      }else{
+  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest-otus.size()][0]) << "\t" << idcount[ibest] << " reversed" << endl;
+        ibest-=db.otus.size();
+        for (int l2=0; l2<db.otus[ibest].size() && (otulim==0 || l2<otulim); ++l2)
+          seqids.add(db.seqs.size()+db.otus[ibest][l2]);
+      }
+    }
+
+    eintarray otureps;
+  
+    // add representatives from all non-chosen OTUS (may improve confidence and novel otu estimation)
+    for (int l=topotus; l<topotus+3 && l<best.size(); ++l){
+      int ibest=best[l];
+      if (ibest<db.otus.size()){
+        if (db.otus[ibest].size()==0) continue;
+        otureps.add(db.otus[ibest][0]);
+      } else {
+  //      cout << "#\t" << str2id << "\t" << seqs.keys(otus[ibest-otus.size()][0]) << "\t" << idcount[ibest] << " reversed" << endl;
+        ibest-=db.otus.size();
+        if (db.otus[ibest].size()==0) continue;
+        otureps.add(db.seqs.size()+db.otus[ibest][0]);
+      }
+    }
+  
+//    cout << "# 2nd counting" << endl;
+
+    randomize(sws.rng,seqids);
+    sws.idcount.init(seqids.size(),0);
+  
+    if (sws.maskid+1u<sws.maskid){
+      sws.maskid=1u;
+      sws.kmermask.init(KMERSIZE,0u);
+    }
+    ++sws.maskid;
+  
+    ti2=ti2*0.99+t1.lap()*0.01;
+  //  memset(sws.kmerbitmask,0,(MAXSIZE2/64+1)*sizeof(uint64_t));
+  //  setkmermask(sws.kmerbitmask,s,akmers,0xFul);
+  //  kmercount_mask(db.seqs,seqids,sws.kmerbitmask,sws.maskid,sws.idcount,akmers,0xFul);
+//    cout << "# 2nd counting -- setkmermask" << endl;
+    setkmermask(sws.kmermask,s,sws.maskid,akmers,0xFul,s_start,s_end);
+//    cout << "# 2nd counting -- kmercount_mask" << endl;
+    kmercount_mask(db.seqs,seqids,sws.kmermask,sws.maskid,sws.idcount);
+    ts2=ts2*0.99+t1.lap()*0.01;
+  
+  /*
+    int ibest=0;
+    for (int l=1; l<sws.idcount.size(); ++l)
+      if (sws.idcount[l]>sws.idcount[ibest]) ibest=l;
+  
+    if (sws.idcount[ibest]<1) {
+      pinfo.seqid=-2;
+      return;  // no hits in db found, skip query
+    }
+  */
+  
+    best.clear();
+    for (l=0; l<sws.idcount.size(); ++l){
+      if (sws.idcount[l]>=minid2){ best.add(l); ++l; break; }
+    }
+    for (; l<sws.idcount.size(); ++l){
+  //    if (idcount[l]<idcount[best[best.size()-1]] && (idcount[l]<0.8*idcount[ibest] && best.size()>=20 || best.size()==100)) continue; // worse id than the bottom of the list
+      if (sws.idcount[l]<minid2 || (sws.idcount[l]<sws.idcount[best[best.size()-1]] && best.size()>=tophits)) continue; // zero counts or worse id than the bottom of the list
+  
+      int j;
+      for (j=0; j<best.size() && sws.idcount[l]<sws.idcount[best[j]]; ++j);
+  
+  //    if (best.size()<20 || idcount[l]<0.8*idcount[ibest] && best.size()<100)
+      if (best.size()<tophits)
+        best.add(l);
+      for (int tj=best.size()-1; tj>j; --tj)
+        best[tj]=best[tj-1];
+      best[j]=l;
+    }
+    if (best.size()==0){
+//      pinfo.seqid=-2;
+//      return;  // no hits in db found, skip query
+      continue;
+    }
+
+/*  
+    for (l=0; l<sws.idcount.size(); ++l){
+      if (db.seqs.keys(seqids[l]%db.seqs.size())==str2id){
+        cout << "# topmatch2: " << sws.idcount[best[0]] << endl;
+        cout << "#" << str2id << " selfmatch2: " << sws.idcount[l] << endl;
+        break;
+      }
+    }
+*/
+
+    if (sws.offset+(unsigned int)(s_len)<sws.offset){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
+      sws.offset=1u;
+      sws.kmerpos.init(MAXSIZE,0u);
+      sws.kmerposrev.init(MAXSIZE,0u);
+    }
+//    cout << "# 2nd counting -- setkmerpos" << endl;
+    setkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
+//    cout << "# 2nd counting -- setkmerposrev" << endl;
+    setkmerpos(sws.kmerposrev,srev,sws.offset);
+
+    for (int i=0; i<otureps.size(); ++i){
+      best.add(seqids.size());
+      seqids.add(otureps[i]);
+    }
+//    best+=otureps;
+   
+  /*
+    // add last added seqs (worst kmercounts) to improve confidence estimation by keeping lower scoring seqs for full alignment
+    // TODO: might not need full alignment but just estimated alignment score from shared kmers
+    eintarray chosenflag;
+    chosenflag.init(seqids.size(),0);
+  
+    for (int l=0; l<best.size(); ++l) chosenflag[best[l]]=1;
+    for (int l=0,c=seqids.size()-1; c>=0 && l<10; --c){
+      if (chosenflag[c]==1 || sws.idcount[c]==0) continue; // no shared kmer or already in list
+      chosenflag[c]=1;
+      best.add(c);
+      ++l;
+    }
+  */
+  
+  //  eintarray seqboth;
+  //  seqboth.init(db.seqs.size(),-1);
+//    cout << "# aligning" << endl;
+  
+    for (int l=0; l<best.size(); ++l){
+      int sbest=seqids[best[l]]%db.seqs.size();
+      eseq &sdb(db.seqs.values(sbest));
+      if (sws.offset2+(unsigned int)(db.seqs.values(sbest).seqlen)<sws.offset2){  // need an unsigned int here otherwise the comparison is made in long and the offset is not correctly reset, signed int overflows are undefined so this cannot be done with signed ints either
+        sws.offset2=1u;
+        sws.kmerpos2.init(MAXSIZE,0);
+      }
+      setkmerpos(sws.kmerpos2,db.seqs.values(sbest),sws.offset2);
+  
+      ealigndata adata;
+      adata.seqid=sbest;
+      adata.revcompl=(seqids[best[l]]>=db.seqs.size());
+      adata.kmercount=sws.idcount[best[l]];
+    
+      if (seqids[best[l]]<db.seqs.size()){
+//        cout << "# forward align" << endl;
+        seqident_global(str2id,db.seqs.keys(sbest),s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
+  //      seqident_global(s,sws.kmerpos,sdb,adata,sws,as);
+  //      seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+  /*
+        seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+        seqident_local(s,sws.kmerpos,sdb,adata2,sws,as);
+  
+        cout << str2id << endl;
+        cout << "# " << " M:"<<adata.matches << " X:" << adata.mismatches << " G:"<<adata.gaps << " S:"<< adata._score << " "<< adata.profile << endl;
+        if (!(adata==adata2))
+          cout << "#!" << " M:"<<adata2.matches << " X:" << adata2.mismatches << " G:"<<adata2.gaps << " S:"<<adata2._score << " K:" << adata2.kmercount << " " << adata2.profile << endl;
+  */
+      }else{
+//        cout << "# reverse align" << endl;
+        seqident_global(str2id,db.seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata,sws,as);
+        // flip 
+        int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
+        adata.revcompl=true;
+  //      seqident_global(srev,sws.kmerposrev,sdb,adata,sws,as);
+  //      seqcalign_global_noedgegap(srev,0,srev.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+  /*
+        seqcalign_global_noedgegap(srev,0,srev.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
+        seqident_local(srev,sws.kmerposrev,sdb,adata2,sws,as);
+  
+        cout << str2id << endl;
+        cout << "# " << " M:"<<adata.matches << " X:" << adata.mismatches << " G:"<<adata.gaps << " S:" <<adata._score << " " << adata.profile << endl;
+        if (!(adata==adata2))
+          cout << "#!" << " M:"<<adata2.matches << " X:" << adata2.mismatches << " G:"<<adata2.gaps << " S:" << adata2._score << " K:" << adata2.kmercount << " " << adata2.profile << endl;
+  */
+  
+      }
+      adata.globalalign(as);
+  //    LDEBUG(D_SEQALIGNMENT,print_tncount(&tncounts[l*NCOUNT_MAXLEN],0,s.seqlen));
+      if (adata.matches+adata.mismatches>0 && adata.score()>=minscore){
+        adata._eval=sdb.seqlen*exp(-lambda*adata.score()); // for K-A stats we need (*s.seqlen) but this is constant
+        pinfo.matchcounts.add(adata);
+      }
+  
+      sws.offset2+=db.seqs.values(sbest).seqlen;
+    }
+    sws.offset+=s_len;
+ 
+    if (pinfo.matchcounts.size()>0){
+      heapsort(pinfo.matchcounts);
+    //  for (int i=0; i<pinfo.matchcounts.size(); ++i)
+    //    cout << "#best: " << i << " " << seqs.keys(pinfo.matchcounts[i].seqid) << " " << pinfo.matchcounts[i].score() << endl;
+      pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
+      pinfo.seqid=pinfo.tophit.seqid;
+      pinfoarr.add(pinfo);
+    }
+  }
+  ta=ta*0.99+t1.lap()*0.01;
+}
+
 void seqsearch(const estr& str2id,eseqdb& db,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws)
 {
   t1.reset();
@@ -5471,7 +5835,11 @@ void taskSearch()
       eseq& s(pbuf->values(i));
       earray<epredinfo> pinfoarr;
   //    ebasicarray<ealigndata> matchcounts;
-      seqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      if (galign)
+        seqsearch_global(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+      else
+        seqsearch(pbuf->keys(i),*mtdata.seqdb,s,pinfoarr,searchws);
+
       if (pinfoarr.size()==0) continue;
 //      if (pinfo.tophit.seqid<0) continue;
 
@@ -7361,6 +7729,7 @@ int emain()
   getParser().onHelp=help;
   cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
   initdlt();
+  epregister(galign);
   epregister(sweight);
   epregister(sweightabs);
   epregister(swmin);
