@@ -6684,7 +6684,173 @@ void processQueryPairend(eseqdb& db,const estr& fname,const estr& fname2,void (*
   cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
 }
 
-void processQuery(eseqdb& db,const estr& fname,void (*taskfunc)())
+int minlen=75;
+float minqual=0.05;
+
+char qlt[256];
+
+unsigned char lt[256];
+unsigned char lt16[1u<<16u];
+
+void fastq_filter(const estr& id,const estr& qual,estr& seq){
+  ldieif(qual.len()!=seq.len(),"qual and seq string length mismatch: "+id+" "+seq.len()+" "+qual.len());
+  if (id.len()==0 || qual.len()==0) return;
+  int lastbad=0;
+  int bad=0;
+  int e=seq.len();
+  for (int j=0; j<qual.len(); ++j){
+    ldieif(qlt[qual[j]]==-1,"unknown quality char: "+id+" '"+estr(qual[j])+"'");
+    if (qlt[qual[j]]<=10 || seq[j]=='N'){
+      if (lastbad==1){
+        e=j-1;
+        --bad;
+        break;
+      }
+      ++bad;
+      lastbad=1;
+    }else
+      lastbad=0;
+  }
+ 
+  if (float(bad)/e<=minqual && e>=minlen)
+//    cout << '>' << id << endl;
+//    cout << (e==seq.len()?seq:seq.substr(0,e)) << endl;
+    seq.del(e);
+  else
+    seq.clear();
+}
+
+void processQueryFASTQ(eseqdb& db,const estr& fname,void (*taskfunc)()){
+  estr qualchrs="!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+  for (int i=0; i<256; ++i){
+    lt[i]=1;
+    qlt[i]=-1;
+  }
+  for (int i=0; i<qualchrs.len(); ++i)
+    qlt[(unsigned char)qualchrs[i]]=i;
+
+  lt['N']=0;
+  lt['n']=0;
+  lt['A']=0;
+  lt['T']=0;
+  lt['G']=0;
+  lt['C']=0;
+  lt['a']=0;
+  lt['t']=0;
+  lt['g']=0;
+  lt['c']=0;
+
+  for (unsigned int i=0u; i<(1u<<16u); ++i)
+    lt16[i]=lt[i&0xff]+lt[(i>>8u)&0xff];
+
+  etimer t1;
+  t1.reset();
+
+  egzfile f;
+  estr line,line2;
+  estrarray args;
+
+  t1.reset();
+  ethreads t;
+  emutex m;
+  
+  ldieif(fname=="-","reading from stdin not supported with paired end data");
+ 
+  f.open(fname,"r");
+
+  mtdata.seqdb=&db;
+  mtdata.finished=false;
+
+  t1.reset();
+  t.run(taskfunc,evararray(),nthreads);
+
+  mtdata.sbuffer.reserve(nthreads*2);
+  for (int i=0; i<nthreads*2; ++i){
+    estrarrayof<eseq> *sarr=new estrarrayof<eseq>;
+    for (int j=0; j<100; ++j) sarr->add(estr(),eseq());
+    mtdata.sbuffer.add(sarr);
+  }
+
+  estr str2id,str2seq,strqual;
+
+  long seqcount=0l;
+  fprintf(stderr,"# processing FASTQ input... ");
+  fflush(stderr);
+  lerrorif(!f.readln(line),"unable to read query file");
+  estrarrayof<eseq> *cbuf=0x00;
+  int cbufind=0;
+  const int MAXSEQLEN=100000;
+  long seqstart;
+  str2seq.reserve(MAXSEQLEN);
+  while (!f.eof()){
+    if (cbuf==0x00){
+      mtdata.m.lock();
+      while (mtdata.sbuffer.size()==0) mtdata.sbufferSignal.wait(mtdata.m);
+      cbuf=mtdata.sbuffer[mtdata.sbuffer.size()-1];
+      mtdata.sbuffer.erase(mtdata.sbuffer.size()-1);
+      mtdata.m.unlock();
+      cbufind=0;
+    }
+
+    seqstart=0l;
+    str2id=line;
+    ldieif(str2id.len()==0 || str2id[0]!='@',"Unexpected line: "+str2id);
+    str2id.del(0,1);
+    int i=str2id.findchr(" \t");
+    if (i!=-1l) str2id.del(i); // only keep id up to first white space
+
+    str2seq.clear();
+    strqual.clear();
+    //TODO: read a limited number of nucleotides each time, so the code does not depend on line breaks. For every nucleotide "chunk", compress the nucleotides and add to sequence
+    while (f.readln(line) && line.len()){
+      ldieif(lt[line[0]]!=0,"expected nucleotide in: "+line);
+      str2seq+=line;
+    }
+
+    f.readln(line);
+    ldieif(line[0]!='+',"expected + in: "+line);
+
+    while (f.readln(line) && line.len()){
+      ldieif(qlt[line[0]]==-1,"expected quality char in: "+line);
+      strqual+=line;
+    }
+
+    fastq_filter(str2id,strqual,str2seq);
+    if (str2seq.len()==0) { ++seqcount; continue; }
+
+    cbuf->keys(cbufind)=str2id;
+    eseq& s(cbuf->values(cbufind));
+    s.setseq(str2seq);
+    s.seqstart=seqstart;
+    ++cbufind;
+    if (cbufind==cbuf->size()){
+      mtdata.m.lock();
+      mtdata.seqs.add(cbuf);
+      mtdata.seqsSignal.signal();
+      cbuf=0x00;
+      cbufind=0;
+    }
+    ++seqcount;
+    if (seqcount%100==0 && isatty(2))
+      fprintf(stderr,"\r# processing FASTQ input... %li",seqcount);
+//      fprintf(stderr,"\r# processing input... %li  ti: %f ts: %f ti2: %f ts2: %f ta: %f tdp1: %f tdp2: %f tdpfl: %f tdpmd: %f",seqcount,ti,ts,ti2,ts2,ta,tdp1,tdp2,tdpfl,tdpmd);
+  }
+  mtdata.m.lock();
+  if (cbuf!=0x00){
+    for (int i=cbuf->size()-1; i>=cbufind; --i) cbuf->erase(i);
+    mtdata.seqs.add(cbuf);
+    cbuf=0x00;
+  }
+  mtdata.finished=true;
+  mtdata.seqsSignal.broadcast();
+  mtdata.m.unlock();
+  
+  fprintf(stderr,"\r# processing FASTQ input... %li\n",seqcount);
+  f.close();
+}
+
+
+void processQueryFASTA(eseqdb& db,const estr& fname,void (*taskfunc)())
 {
   etimer t1;
   t1.reset();
@@ -6995,7 +7161,7 @@ void actionCluster()
 //  loadSequences(db);
 //  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
 //  ldieif(db.seqs.size()==0,"empty database");
-  processQuery(db,getParser().args[1],taskCluster);
+  processQueryFASTA(db,getParser().args[1],taskCluster);
   exit(0);
 }
 
@@ -7040,7 +7206,7 @@ void actionClusterCompress()
   initDB(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
 //  ldieif(db.seqs.size()==0,"empty database");
-  processQuery(db,getParser().args[1],taskClusterCompress);
+  processQueryFASTA(db,getParser().args[1],taskClusterCompress);
   exit(0);
 }
 
@@ -7206,7 +7372,7 @@ void actionProtSearch()
 //  loadTaxonomy(db);
   printSearchHeader(db);
 
-  processQuery(db,getParser().args[1],taskProtSearch);
+  processQueryFASTA(db,getParser().args[1],taskProtSearch);
 
   exit(0);
 }
@@ -7303,7 +7469,7 @@ void actionCompress()
   initDB(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
-  processQuery(db,getParser().args[1],taskCompress);
+  processQueryFASTA(db,getParser().args[1],taskCompress);
   exit(0);
 }
 
@@ -7361,6 +7527,11 @@ int emain()
   getParser().onHelp=help;
   cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
   initdlt();
+  bool fastq=false;
+
+  epregister(minqual);
+  epregister(minlen);
+  epregister(fastq);
   epregister(sweight);
   epregister(sweightabs);
   epregister(swmin);
@@ -7460,7 +7631,10 @@ int emain()
 
   printSearchHeader(db);
 
-  processQuery(db,getParser().args[1],taskSearch);
+  if (!fastq)
+    processQueryFASTA(db,getParser().args[1],taskSearch);
+  else
+    processQueryFASTQ(db,getParser().args[1],taskSearch);
 
   exit(0);
 
