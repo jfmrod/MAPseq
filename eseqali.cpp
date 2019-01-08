@@ -1828,6 +1828,35 @@ estr sali_decompress(const estr& astr,const eseq& seq2)
   return(str);
 }
 
+
+void ealigndata::globalalign(const ealignscore& as)
+{
+  double tscore=0.0;
+  int tgaps=0;
+
+  if (profile.elm.size()==0) return;
+
+  int i1=0,i2=profile.elm.size()-1;
+  if (profile.elm[i1].type==AT_LEFT || profile.elm[i1].type==AT_RIGHT) ++i1;
+  if (i1<profile.elm.size() && (profile.elm[i1].type==AT_INS || profile.elm[i1].type==AT_DEL)) ++i1;
+
+  if (profile.elm[i2].type==AT_LEFT || profile.elm[i2].type==AT_RIGHT) --i2;
+  if (i2>0 && (profile.elm[i2].type==AT_INS || profile.elm[i2].type==AT_DEL)) --i2;
+
+  for (int i=i1; i<i2; ++i){
+    ealignelem& e(profile.elm[i]);
+    switch (e.type){
+      case AT_MATCH: tscore+=e.count*as.match; break;
+      case AT_MISS: tscore-=e.count*as.mismatch; break;
+      case AT_DEL:
+      case AT_INS: tscore-=as.gapopen+e.count*as.gapext; tgaps+=e.count; break;
+     default: break;
+    }
+  }
+  _score=tscore;
+  gaps=tgaps;
+}
+
 estr ealigndata::compress(const eseq& seq1)
 {
   uint64_t *ps1=reinterpret_cast<uint64_t*>(seq1.seq._str);

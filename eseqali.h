@@ -82,13 +82,17 @@ class ealigndata {
 //  bool operator<(const ealigndata& d) const { return(identity()<d.identity() || identity()==d.identity() && score()<d.score()); }
   double eval() const { return(_eval); }
   double score() const { return(_score); }
+
   double identity() const { return(float(matches)/(matches+mismatches+gaps)); }
+//  double identity() const;
 //  double identity() const { return(float(matches)/(matches+mismatches)); }
   ealigndata(): _eval(1.0),_score(0.0),s1(-1),e1(-1),s2(-1),e2(-1),matches(0),mismatches(0),gaps(0),aln(0x00) {}
 //  double score() const { return(matches*matchcost + mismatches*misscost + gaps*gapcost); }
   estr compress(const eseq& s1);
   estr align_str(const eseq& s1,const eseq& s2);
   estr palign_str(const eseq& s1,const eseq& s2);
+
+  void globalalign(const ealignscore& as);
 };
 
 estr sali_decompress(const estr& sastr,const eseq& s2);

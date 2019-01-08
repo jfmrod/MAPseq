@@ -1,7 +1,7 @@
 #!/bin/bash
 
-wget http://www.meringlab.org/software/mapseq/mapref-2.2.tar.gz
-tar -Cdata -xvzf mapref-2.2.tar.gz && mv data/mapref-2.2/* data/ && rmdir data/mapref-2.2 && touch data/mapref.fna
+wget http://www.microbeatlas.org/mapref/mapref-2.2b.tar.gz
+tar -Cdata -xvzf mapref-2.2b.tar.gz && mv data/mapref-2.2b/* data/ && rmdir data/mapref-2.2b && touch data/mapref-2.2b.fna
 
 svn co https://www.konceptfx.com/svn/eutils
 pushd eutils
