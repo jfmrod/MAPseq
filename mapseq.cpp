@@ -6293,12 +6293,13 @@ void loadCluster(eseqdb& db,const estr& cfile)
   f.open(cfile,"r");
   estr line;
   eintarray tmpkmers;
+  estrarray parts;
   int i;
 
   tmpkmers.init(MAXSIZE,0);
-  while (!f.eof() && f.readln(line)){
+  while (!f.eof() && f.readarr(line,parts)){
     if (line.len()==0) continue;
-    estrarray parts(line.explode(" "));
+    ldieif(parts.size()<2,"less than 2 parts: "+line);
 
     int tmpi,repid=-1;
     for (i=1; i<parts.size(); ++i){
@@ -7585,11 +7586,12 @@ void actionPairend()
 
   eseqdb db;
   loadSequences(db,3);
-  initDB(db,3);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
   ldieif(getParser().args.size()<3,"not enough arguments, syntax: mapseq -paired <paired1.fna> <paired2.fna> [db] [[tax1] [tax2] ...]");
   loadTaxonomy(db,4);
+
+  initDB(db,3);
 
   printSearchHeader(db);
 
@@ -7598,27 +7600,39 @@ void actionPairend()
   exit(0);
 }
 
-estr mapseq(const estr& seq,eseqdb& db,estrhash& sids)
+estr mapseq(const estr& fastr,eseqdb& db,estrhash& sids)
 {
-  if (!seq.len()) return("{\"error\":\"empty sequence\"}"); 
+  if (!fastr.len()) return("{\"error\":\"empty query\"}"); 
 
-  estr tmpstr;
-  estr sid;
-  eseq s;
-  if (seq[0]=='>'){
-    int i=seq.find("\n");
-    if (i==-1) return("{\"error\":\"missing sequence\"}");
-    sid=seq.substr(0,i);
-    tmpstr=seq.substr(i+1);
-    tmpstr.replace("\n","");
-    s.setseq(seq.substr(i+1));
-  }else if (sids.exists(seq) && db.seqs.findkey(sids[seq])>=0){ // accession id to sequence in 
-    s=db.seqs[sids[seq]];
+  estr sid,seqstr;
+  estr line;
+  estrarrayof<eseq> seqs;
+  eseq tmps;
+  if (fastr[0]=='>'){
+    estr tmpfastr(fastr);
+    while (tmpfastr.len()){
+      tmpfastr.getline(sid);
+      sid.del(0,1);
+      
+  //    int i=seq.find("\n");
+      seqstr.clear();
+      while (tmpfastr.getline(line) && line.len() && line[0]!='>')
+        seqstr+=line;
+  
+      tmps.setseq(seqstr);
+      if (seqstr.len()==0) return("{\"error\":\"missing sequence: "+sid+"\"}");
+      tmps.setseq(seqstr);
+      seqs.add(sid,tmps);
+    }
+  }else if (sids.exists(fastr) && db.seqs.findkey(sids[fastr])>=0){ // accession id to sequence in 
+    seqs.add(fastr,db.seqs[sids[fastr]]);
   }else{
-    tmpstr=seq;
-    tmpstr.replace("\n","");
-    s.setseq(seq);
+    estr tmpfastr(fastr);
+    tmpfastr.replace("\n","");
+    tmps.setseq(tmpfastr);
+    seqs.add("query",tmps);
   }
+  if (seqs.size()==0) return("[]");
   
   estr outstr;
   esearchws searchws;
@@ -7638,72 +7652,78 @@ estr mapseq(const estr& seq,eseqdb& db,estrhash& sids)
   searchws.maskid=1u;
 
   outstr.clear();
-
-  earray<epredinfo> pinfoarr;
-  seqsearch("query",db,s,pinfoarr,searchws);
-  if (pinfoarr.size()==0) return("{\"error\":\"No hits found for your search\"}");
+  outstr+="[";
+  for (int i=0; i<seqs.size(); ++i){
+    outstr+="{\"queryid\":\""+seqs.keys(i)+"\",\"hits\":[";
+    eseq& s(seqs.values(i));
+    earray<epredinfo> pinfoarr;
+    seqsearch(seqs.keys(i),db,s,pinfoarr,searchws);
+    if (pinfoarr.size()==0) { outstr+="]},"; continue; } // return("{\"error\":\"No hits found for your search\"}");
   
-  epredinfo *topinfo=&pinfoarr[0];
-  for (int pi=1; pi<pinfoarr.size(); ++pi){
-    if (pinfoarr[pi].tophit.score()>topinfo->tophit.score()) topinfo=&pinfoarr[pi];
-  }
-
-  epredinfo& pinfo(*topinfo);
-  float taxcutoffmin=pinfo.matchcounts[0].identity();
-  float bid=pinfo.tophit.identity();
-  if (db.taxa.size() && db.taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
-    eseqtax &tmptaxhit(*db.taxa.at(0).seqs[pinfo.tophit.seqid]);
-    if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
-  }
-    
-  outstr+="[{\"id\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"score\":"+pinfo.tophit.score()+",\"identity\":"+pinfo.tophit.identity()+",\"matches\":"+pinfo.tophit.matches+",\"mismatches\":"+pinfo.tophit.mismatches+",\"gaps\":"+pinfo.tophit.gaps+",\"qstart\":"+(s.seqstart+pinfo.tophit.s1)+",\"qend\":"+(s.seqstart+pinfo.tophit.e1)+",\"dstart\":"+pinfo.tophit.s2+",\"dend\":"+pinfo.tophit.e2+",\"strand\":"+(pinfo.tophit.revcompl?"1":"0");
-//    outstr+="query\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
-     
-  pinfo.tophit.profile.inv();
-  outstr+=",\"sumalign\":\""+pinfo.tophit.profile.str()+"\"";
-  outstr+=",\"alignment\":\""+pinfo.tophit.align_str(s,db.seqs.values(pinfo.tophit.seqid)).replace("\n","\\n")+"\"";
-
-  if (db.taxa.size()==0){
-    double topscore=pinfo.tophit.score();
-    double tscore=0.0;
-    for (int t=0; t<pinfo.matchcounts.size(); ++t)
-      tscore+=exp((pinfo.matchcounts[t].score()-topscore)*sweightabs);
-//      tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
-    outstr+=",\"taxa\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"confidence\":"+(1.0/tscore);
-//      outstr+="\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
-  }
-
-  edoublearray taxscores;
-  for (int t=0; t<db.taxa.size(); ++t){
-    etax& tax(db.taxa.at(t));
-    
-    earrayof<double,int> ptax;
+    epredinfo *topinfo=&pinfoarr[0];
+    for (int pi=1; pi<pinfoarr.size(); ++pi){
+      if (pinfoarr[pi].tophit.score()>topinfo->tophit.score()) topinfo=&pinfoarr[pi];
+    }
+  
+    epredinfo& pinfo(*topinfo);
+    float taxcutoffmin=pinfo.matchcounts[0].identity();
+    float bid=pinfo.tophit.identity();
+    if (db.taxa.size() && db.taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+      eseqtax &tmptaxhit(*db.taxa.at(0).seqs[pinfo.tophit.seqid]);
+      if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+    }
+      
+    outstr+="{\"hitid\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"score\":"+pinfo.tophit.score()+",\"identity\":"+pinfo.tophit.identity()+",\"matches\":"+pinfo.tophit.matches+",\"mismatches\":"+pinfo.tophit.mismatches+",\"gaps\":"+pinfo.tophit.gaps+",\"qstart\":"+(s.seqstart+pinfo.tophit.s1)+",\"qend\":"+(s.seqstart+pinfo.tophit.e1)+",\"dstart\":"+pinfo.tophit.s2+",\"dend\":"+pinfo.tophit.e2+",\"strand\":"+(pinfo.tophit.revcompl?"1":"0");
+  //    outstr+="query\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+       
+    pinfo.tophit.profile.inv();
+    outstr+=",\"sumalign\":\""+pinfo.tophit.profile.str()+"\"";
+    outstr+=",\"alignment\":\""+pinfo.tophit.align_str(s,db.seqs.values(pinfo.tophit.seqid)).replace("\n","\\n")+"\"";
+  
+    if (db.taxa.size()==0){
+      double topscore=pinfo.tophit.score();
+      double tscore=0.0;
+      for (int t=0; t<pinfo.matchcounts.size(); ++t)
+        tscore+=exp((pinfo.matchcounts[t].score()-topscore)*sweightabs);
+  //      tscore+=exp((1.0l-topscore/pinfo.matchcounts[t].score())*sweight);
+      outstr+=",\"taxa\":\""+db.seqs.keys(pinfo.tophit.seqid)+"\",\"confidence\":"+(1.0/tscore);
+  //      outstr+="\t"+db.seqs.keys(pinfo.tophit.seqid)+"\t"+estr(1.0/tscore);
+    }
+  
     edoublearray taxscores;
-    efloatarray mcfarr;
-    taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts,s.seqlen);
-    taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax,s.seqlen);
-   
-    if (ptax.size()>3){
-      outstr+=",\"taxa\":\""+tax.names[0].at(ptax.keys(0))+";"+tax.names[1].at(ptax.keys(1))+";"+tax.names[2].at(ptax.keys(2))+";"+tax.names[3].at(ptax.keys(3))+"\",\"confidence\":"+mcfarr[3];
-    }else{
-      outstr+=",\"error\":\"unexpected number of taxa levels\"";
-    }
-    outstr+="}";
-
-    efloatarray tmpmcfarr;
-    earrayof<double,int> tmptax;
-    for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
-      ealigndata& adata(pinfo.matchcounts[l]);
-      taxScore(tmptax,tmpmcfarr,adata,pinfo,taxscores,tax,s.seqlen);
-      outstr+=",{\"id\":\""+db.seqs.keys(adata.seqid)+"\",\"score\":"+adata.score()+",\"identity\":"+adata.identity()+",\"matches\":"+adata.matches+",\"mismatches\":"+adata.mismatches+",\"gaps\":"+adata.gaps+",\"qstart\":"+(s.seqstart+adata.s1)+",\"qend\":"+(s.seqstart+adata.e1)+",\"dstart\":"+adata.s2+",\"dend\":"+adata.e2+",\"strand\":"+(adata.revcompl?"1":"0");
-      adata.profile.inv();
-      outstr+=",\"sumalign\":\""+adata.profile.str()+"\"";
-      outstr+=",\"alignment\":\""+adata.align_str(s,db.seqs.values(adata.seqid)).replace("\n","\\n")+"\"";
-      outstr+=",\"taxa\":\""+tax.names[0].at(tmptax.keys(0))+";"+tax.names[1].at(tmptax.keys(1))+";"+tax.names[2].at(tmptax.keys(2))+";"+tax.names[3].at(tmptax.keys(3))+"\",\"confidence\":"+tmptax.values(3);
-//         outstr+=",\"taxa\":\""+(stax.tl.size()>3?tax.names[0].at(stax.tl[0].tid)+";"+tax.names[1].at(stax.tl[1].tid)+";"+tax.names[2].at(stax.tl[2].tid)+";"+tax.names[3].at(stax.tl[3].tid):"")+"\",\"confidence\":"+tmptax.values(3)+"}";
+    for (int t=0; t<db.taxa.size(); ++t){
+      etax& tax(db.taxa.at(t));
+      
+      earrayof<double,int> ptax;
+      edoublearray taxscores;
+      efloatarray mcfarr;
+      taxScoreSum(taxscores,pinfo,tax,searchws.taxcounts,s.seqlen);
+      taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores,tax,s.seqlen);
+     
+      if (ptax.size()>3){
+        outstr+=",\"taxa\":\""+tax.names[0].at(ptax.keys(0))+";"+tax.names[1].at(ptax.keys(1))+";"+tax.names[2].at(ptax.keys(2))+";"+tax.names[3].at(ptax.keys(3))+"\",\"confidence\":"+mcfarr[3];
+      }else{
+        outstr+=",\"error\":\"unexpected number of taxa levels\"";
+      }
       outstr+="}";
+  
+      efloatarray tmpmcfarr;
+      earrayof<double,int> tmptax;
+      for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
+        ealigndata& adata(pinfo.matchcounts[l]);
+        taxScore(tmptax,tmpmcfarr,adata,pinfo,taxscores,tax,s.seqlen);
+        outstr+=",{\"hitid\":\""+db.seqs.keys(adata.seqid)+"\",\"score\":"+adata.score()+",\"identity\":"+adata.identity()+",\"matches\":"+adata.matches+",\"mismatches\":"+adata.mismatches+",\"gaps\":"+adata.gaps+",\"qstart\":"+(s.seqstart+adata.s1)+",\"qend\":"+(s.seqstart+adata.e1)+",\"dstart\":"+adata.s2+",\"dend\":"+adata.e2+",\"strand\":"+(adata.revcompl?"1":"0");
+        adata.profile.inv();
+        outstr+=",\"sumalign\":\""+adata.profile.str()+"\"";
+        outstr+=",\"alignment\":\""+adata.align_str(s,db.seqs.values(adata.seqid)).replace("\n","\\n")+"\"";
+        outstr+=",\"taxa\":\""+tax.names[0].at(tmptax.keys(0))+";"+tax.names[1].at(tmptax.keys(1))+";"+tax.names[2].at(tmptax.keys(2))+";"+tax.names[3].at(tmptax.keys(3))+"\",\"confidence\":"+tmptax.values(3);
+  //         outstr+=",\"taxa\":\""+(stax.tl.size()>3?tax.names[0].at(stax.tl[0].tid)+";"+tax.names[1].at(stax.tl[1].tid)+";"+tax.names[2].at(stax.tl[2].tid)+";"+tax.names[3].at(stax.tl[3].tid):"")+"\",\"confidence\":"+tmptax.values(3)+"}";
+        outstr+="}";
+      }
     }
+    outstr+="]},";
   }
+  outstr.del(-1);
   outstr+="]";
 
   return(outstr);
@@ -7711,21 +7731,24 @@ estr mapseq(const estr& seq,eseqdb& db,estrhash& sids)
 
 void actionDaemon()
 {
+  eseqdb db;
+  estrhash sids;
+  epregisterFuncD(mapseq,evararray(evarRef(db),evarRef(sids)));
+  eparseArgs();
+
   doInit();
 
-  eseqdb db;
   loadSequences(db,1);
-  initDB(db,1);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
   loadTaxonomy(db,2);
+  initDB(db,1);
 
-  estrhash sids;
   for (int i=0; i<db.seqs.size(); ++i)
     sids.add(db.seqs.keys(i).explode(":")[0],db.seqs.keys(i));
   
-  epregisterFuncD(mapseq,evararray(evarRef(db),evarRef(sids)));
-  eparseArgs();
+  cerr << "# waiting for queries..." << endl;
+  
   getSystem().run();
 }
 
@@ -7757,9 +7780,6 @@ void actionLoadTaxBinary()
   eseqdb db;
   loadSequencesBinary(db,getParser().args[1]);
   cerr << "# seqs laoded: " << db.seqs.size() << endl;
-  initDB(db,1);
-  cerr << "# init db done" << endl;
-
   loadTaxonomyBinary(db,getParser().args[2]);
   cerr << "# taxonomies: " << db.taxa.size() << endl;
   for (int i=0; i<db.taxa.size(); ++i){
@@ -7768,6 +7788,9 @@ void actionLoadTaxBinary()
       cerr << "# tax: " << i << " level: " << j << " ("<< db.taxa[i].names[j].size() << ")" << endl;
     }
   }
+  initDB(db,1);
+  cerr << "# init db done" << endl;
+
   exit(0);
 }
 
@@ -7797,10 +7820,10 @@ void actionConvertTax()
 
   eseqdb db;
   loadSequences(db,1);
-  initDB(db,1);
   loadTaxonomy(db,2);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
+  initDB(db,1);
   saveTaxonomy(db,db.taxa[0],getParser().args[1]+".mstax");
   exit(0);
 }
