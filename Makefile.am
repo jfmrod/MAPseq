@@ -5,6 +5,7 @@ DIST_SUBDIRS=$(subdirs)
 
 AM_CXXFLAGS=-DDATAPATH='"$(datadir)/mapseq"'
 
+
 if !USE_SYSEUTILS
   LDADD=eutils/libeutils.la
   AM_CXXFLAGS+= -I$(srcdir)/eutils
@@ -36,7 +37,14 @@ mapref_DATA=$(mapref_files)
 
 # data/mapseqref.fa data/mapseqref.ncbitax data/mapseqref.otutax 
 
-mapseq_SOURCES=mapseq.cpp eseqali.h ekmerhashmap.h ekmerhashmap_dec.h kmerseqtables-data.h kmerseqtables-data.cpp eseqali.h eseqali.cpp eseq.h eseq.cpp
+lib_LTLIBRARIES=libmapseq.la
+libmapseq_la_SOURCES=eseqdb.h eseqdb.cpp eseqali.h eseqali.cpp ekmerhashmap.h ekmerhashmap_dec.h kmerseqtables-data.h kmerseqtables-data.cpp eseq.h eseq.cpp emseq_defs.h
+libmapseq_la_include_HEADERS=eseqdb.h eseqali.h eseq.h emseq_defs.h mapseq-config.h kmerseqtables-data.h
+libmapseq_la_includedir=$(includedir)/mapseq
+
+
+mapseq_SOURCES=mapseq.cpp eseqali.h ekmerhashmap.h ekmerhashmap_dec.h kmerseqtables-data.h eseqali.h eseq.h eseqdb.h emseq_defs.h
+mapseq_LDADD=libmapseq.la
 #mapseq_LDADD=libmapseqali.a eutils/libeutils.la
 #mapseq_LDADD=eutils/libeutils.la
 #mapseq_DEPENDENCIES=kmerseqtables-data.h
