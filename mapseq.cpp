@@ -411,6 +411,7 @@ void seqident_seg_left(const eseq& s1,int p1,const eseq& s2,int p2,ealigndata& a
 
 
 bool galign=true;
+bool ignoreEmptyTax=false;
 
 
 inline void sumcounts(unsigned char* tncount,int p1,uint64_t tmpnuc)
@@ -3444,6 +3445,7 @@ void taxscore(earrayof<double,int>& ptax,epredinfo& pinfo,etax& tax,ebasicarray<
 //    if (pinfo.matchcounts[l].score()<=0.0) break; // do not use alignments with less than or zero score
     eseqtax &taxhit(*tax.seqs[sbest]);
     for (int k=0; k<taxhit.tl.size(); ++k){
+      if (ignoreEmptyTax && tax.names[k][taxhit.tl[k].tid].len()==0) continue;
       if (taxcounts[k][taxhit.tl[k].tid]==taxid) continue;
       taxcounts[k][taxhit.tl[k].tid]=taxid;
       taxscores[k]+=exp((1.0l-topscore/pinfo.matchcounts[l].score())*sweight);
@@ -3924,6 +3926,7 @@ int emain()
 
   epregisterFunc(help);
   
+  epregister(ignoreEmptyTax);
 //  epregister(galign);
   bool benchmark=false;
 //  epregister(benchmark);
