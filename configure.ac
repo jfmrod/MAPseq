@@ -47,7 +47,7 @@ case "${host_os}" in
 
 AC_ARG_WITH(syseutils,[AS_HELP_STRING([--with-syseutils],[Use system installed eutils.])],,with_syseutils=no)
 if test "x$with_syseutils" = "xno"; then
-  AC_CONFIG_SUBDIRS([eutils])
+  AC_CONFIG_SUBDIRS([libs/eutils])
 else
   AM_PATH_EUTILS
   if test "x$no_eutils" = "xyes"; then
