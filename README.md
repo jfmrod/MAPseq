@@ -10,11 +10,11 @@ Matias Rodrigues JF, Schmidt TSB, Tackmann J & von Mering C (2017) MAPseq: highl
 ## Table of contents
 
 1. Installation  
-2. MAPseq usage instructions  
+2. MAPseq usage instructions
  a. Default reference  
  b. Custom user-provided reference  
- c. Single sample counts summary
- d. OTU count table for multiple samples
+ c. Single sample counts summar  
+ d. OTU count table for multiple samples  
 3. File output  
 4. History  
 
@@ -128,26 +128,26 @@ mapseq -otucounts <sample1.mseq>
  
 Provides you with summary counts of the MSEQ output files for each taxonomy and level. Example:
 
-#sample.mseq	102301
-Taxonomy	TaxonomyLevel	Label	Counts
-0	0	Bacteria	102301
-0	1	Bacteria;Bacteroidetes	7586
-0	1	Bacteria;Firmicutes	2150
-0	1	Bacteria;Proteobacteria	112
-0	1	Bacteria;PHY_Coriobacteriia	7
-0	1	Bacteria;Actinobacteria	4
-0	1	Bacteria;Fusobacteria	1
-0	2	Bacteria;Bacteroidetes;Bacteroidia	7585
-0	2	Bacteria;Firmicutes;Clostridia	1330
-
+#sample.mseq	102301  
+Taxonomy	TaxonomyLevel	Label	Counts  
+0	0	Bacteria	102301  
+0	1	Bacteria;Bacteroidetes	7586  
+0	1	Bacteria;Firmicutes	2150  
+0	1	Bacteria;Proteobacteria	112  
+0	1	Bacteria;PHY_Coriobacteriia	7  
+0	1	Bacteria;Actinobacteria	4  
+0	1	Bacteria;Fusobacteria	1  
+0	2	Bacteria;Bacteroidetes;Bacteroidia	7585  
+0	2	Bacteria;Firmicutes;Clostridia	1330  
+  
 
 
 ### d) OTU count table for multiple samples
 
-mapseq -otutable <sample1.mseq> <sample2.mseq> ...
+mapseq -otutable <sample1.mseq> <sample2.mseq> ...  
 
 Generates a tab separated value (tsv) file with the counts for each sample (column wise) and OTU or taxonomic labels (row wise).
-Which taxomy (OTU or NCBI taxonomy) and levels in the taxonomy can be specified using the -ti and -tl, respectively.
+Which taxomy (OTU or NCBI taxonomy) and levels in the taxonomy can be specified using the -ti and -tl, respectively.  
 
 
 The generated table can be imported into R with the following R command:
