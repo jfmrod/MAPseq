@@ -120,8 +120,41 @@ HE801216:78..1345       Bacteria;Proteobacteria;Gammaproteobacteria;Methylococca
 HE802067:76740..77993   Bacteria;Actinobacteria;Actinobacteria;Corynebacteriales;Corynebacteriaceae;Corynebacterium;Corynebacterium glutamicum  
 HE804045:1012175..1013425       Bacteria;Actinobacteria;Actinobacteria;Pseudonocardiales;Pseudonocardiaceae;Saccharothrix;Saccharothrix espanaensis  
 
+### c) Single Sample Counts
 
-## 3. FILE OUTPUT
+mapseq -otucounts <sample1.mseq>
+ 
+Provides you with summary counts of the MSEQ output files for each taxonomy and level. Example:
+
+#sample.mseq	102301
+Taxonomy	TaxonomyLevel	Label	Counts
+0	0	Bacteria	102301
+0	1	Bacteria;Bacteroidetes	7586
+0	1	Bacteria;Firmicutes	2150
+0	1	Bacteria;Proteobacteria	112
+0	1	Bacteria;PHY_Coriobacteriia	7
+0	1	Bacteria;Actinobacteria	4
+0	1	Bacteria;Fusobacteria	1
+0	2	Bacteria;Bacteroidetes;Bacteroidia	7585
+0	2	Bacteria;Firmicutes;Clostridia	1330
+
+
+
+### d) OTU count table for multiple samples
+
+mapseq -otutable <sample1.mseq> <sample2.mseq> ...
+
+Generates a tab separated value (tsv) file with the counts for each sample (column wise) and OTU or taxonomic labels (row wise).
+Which taxomy (OTU or NCBI taxonomy) and levels in the taxonomy can be specified using the -ti and -tl, respectively.
+
+
+The generated table can be imported into R with the following R command:
+
+myotutable <- read.table("map.otutable",sep="\t",header=TRUE)
+
+
+
+## 3. MSEQ FILE OUTPUT
 
 In the results output, each line indicates a classification of the read. Two output formats can be chosen ("simple" or "confidences") using the --outfmt option.
 
@@ -132,7 +165,7 @@ Each field is tab separated and indicates the following:
 Field  
 1	Query sequence id  
 2	Reference sequence id (highest alignment score)  
-3	Alignment bitscore  
+3	Alignment score  
 4	Pairwise identity  
 5	Matches  
 6	Mismatches  
@@ -158,9 +191,18 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 
+
+
+
+
+
 ## 4. HISTORY
+1.2.5 (12 Jul 2019)
+- Added "-otucounts" and "-otutable" options to generate count summary for single mapseq (.mseq) files or an otu/taxa table for multiple .mseq files
+
 1.2.4 (27 May 2019)
-- Added "-ignoreEmptyTax" option. Prevents 2nd hits with missing taxonomic labels (uncertain annotation) from decreasing the confidence of the top hit assignment.
+- Added "-ignoreEmptyTax" option. Default is off until thorough benchmarks are performed.
+  Prevents second hits with missing taxonomic labels (uncertain annotation) from decreasing the confidence of the top hit assignment.
 
 1.2.3 (2 Oct 2018)
 - Fixed missing newline causing last sequence to be missed, added assert on empty sequences

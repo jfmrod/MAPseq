@@ -3859,6 +3859,195 @@ void taskSeqsearch()
   delete searchws.bitmask;
 }
 
+template <class T>
+void heapsortr(T& arr){
+  heapsort(arr);
+  for (int i=0; i<arr.size()/2; ++i)
+    arr.swap(i,arr.size()-1-i);
+}
+
+void actionOTUTable()
+{
+  ldieif(getParser().args.size()<2,"syntax: sample1.mseq [sample2.mseq ...]");
+
+  int ti=0;
+  int tl=3;
+  epregisterI(ti,"<integer> choose which taxonomy to make table for, usually OTU (0) or NCBI (1)");
+  epregisterI(tl,"<integer> choose which taxonomic level to make table for, usually OTU 97% (3)");
+  eparseArgs();
+
+  int taxind=-1;
+  egzfile f;
+
+  estr tmptax;
+  int sind,tl1,tli;
+  float cf;
+  earray<earray<estrhashof<eintarray> > > tax;
+  tax.add(earray<estrhashof<eintarray> >());
+
+  eintarray mseqlines;
+  earray<estr> samples;
+
+  for (int l=1; l<getParser().args.size(); ++l){
+    estr run=getParser().args[l];
+    estrarray arr=run.explode("/");
+    samples.add(arr[arr.size()-1]);
+
+    mseqlines.add(0);
+    f.open(getParser().args[1],"r");
+    while (!f.eof() && f.readarr(arr,"\t")){
+      if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
+      if (taxind==-1){
+        for (taxind=0; taxind<arr.size(); ++taxind){
+          if (arr[taxind].len()==0){
+            taxind=taxind+1;
+  //          cout << "taxind: " << taxind << endl;
+            break;
+          }
+        }
+      }
+      ++mseqlines[l-1];
+      sind=taxind;
+      tmptax.clear();
+      tli=0;
+      for (int i=taxind; i<arr.size(); i+=3){
+        if (arr[i].len()==0){
+          ++i;
+          if (i>=arr.size()) break;
+          sind=i;
+          ++tli;
+          if (tax.size()<=tli) tax.add(earray<estrhashof<eintarray> >());
+          tmptax.clear();
+        }
+        tl1=(i-sind)/3;
+        cf=arr[i+1].f();
+  //      cout << arr[i] << " " << cf << endl;
+        if (cf<0.5) continue;
+        tmptax+=";"+arr[i];
+  //      cout << tli << " " << tl << " " << tmptax << " " << cf << endl;
+  
+        earray<estrhashof<eintarray> > &taxonc(tax[tli]);
+  
+        if (taxonc.size()<=tl1) taxonc.add(estrhashof<eintarray>());
+        estrhashof<eintarray> &taxc(taxonc[tl1]);
+        if (!(taxc.exists(tmptax)))
+          taxc.add(tmptax,eintarray());
+        eintarray& taxciarr(taxc[tmptax]);
+        while (taxciarr.size()<l) taxciarr.add(0);
+        ++taxciarr[l-1];
+      }
+    }
+  }
+
+  estrarrayof<int> tmpabs;
+//  cout << ">" << run << "." << readsample << "\t" << mseqlines << endl;
+
+
+  cout << "#TotalCounts:";
+  for (int l=0; l<mseqlines.size(); ++l)
+    cout << "\t" << mseqlines[l];
+
+  cout << endl;
+  for (int l=0; l<samples.size(); ++l)
+    cout << "\t" << samples[l];
+  cout << endl;
+
+
+  ldieif(ti>=tax.size(),"chosen taxonomy number does not exist, please choose a number smaller than "+estr(tax.size()));
+  earray<estrhashof<eintarray> > &taxonc(tax[ti]);
+  ldieif(tl>=taxonc.size(),"chosen taxonomic level does not exist, please choose a number smaller than "+estr(taxonc.size()));
+  estrhashof<eintarray> &taxc(taxonc[tl]);
+  for (int t=0; t<taxc.size(); ++t){
+    cout << taxc.keys(t).substr(1);
+    eintarray& taxciarr(taxc.values(t));
+    for (int l=0; l<mseqlines.size(); ++l)
+      cout << "\t" << (l<taxciarr.size()?taxciarr[l]:0);
+    cout << endl;
+  }
+
+  exit(0);
+}
+
+void actionOTUCounts()
+{
+  ldieif(getParser().args.size()<2,"syntax: sample1.mseq");
+
+  int taxind=-1;
+  egzfile f;
+
+  estr run=getParser().args[1];
+  estrarray arr=run.explode("/");
+  run=arr[arr.size()-1];
+
+  estr tmptax;
+  int sind,tl,tli;
+  float cf;
+  earray<earray<estrhashof<int> > > tax;
+  tax.add(earray<estrhashof<int> >());
+
+  int mseqlines=0;
+  f.open(getParser().args[1],"r");
+  while (!f.eof() && f.readarr(arr,"\t")){
+    if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
+    if (taxind==-1){
+      for (taxind=0; taxind<arr.size(); ++taxind){
+        if (arr[taxind].len()==0){
+          taxind=taxind+1;
+//          cout << "taxind: " << taxind << endl;
+          break;
+        }
+      }
+    }
+    ++mseqlines;
+    sind=taxind;
+    tmptax.clear();
+    tli=0;
+    for (int i=taxind; i<arr.size(); i+=3){
+      if (arr[i].len()==0){
+        ++i;
+        if (i>=arr.size()) break;
+        sind=i;
+        ++tli;
+        if (tax.size()<=tli) tax.add(earray<estrhashof<int> >());
+        tmptax.clear();
+      }
+      tl=(i-sind)/3;
+      cf=arr[i+1].f();
+//      cout << arr[i] << " " << cf << endl;
+      if (cf<0.5) continue;
+      tmptax+=";"+arr[i];
+//      cout << tli << " " << tl << " " << tmptax << " " << cf << endl;
+
+      earray<estrhashof<int> > &taxonc(tax[tli]);
+
+      if (taxonc.size()<=tl) taxonc.add(estrhashof<int>());
+      estrhashof<int> &taxc(taxonc[tl]);
+      if (!(taxc.exists(tmptax)))
+        taxc.add(tmptax,0);
+      ++taxc[tmptax];
+    }
+  }
+
+  estrarrayof<int> tmpabs;
+//  cout << ">" << run << "." << readsample << "\t" << mseqlines << endl;
+  cout << "#" << run << "\t" << mseqlines << endl;
+  cout << "Taxonomy\tTaxonomyLevel\tLabel\tCounts" << endl;
+  for (int i=0; i<tax.size(); ++i){
+    earray<estrhashof<int> > &taxonc(tax[i]);
+    for (int j=0; j<taxonc.size(); ++j){
+      estrhashof<int> &taxc(taxonc[j]);
+      tmpabs.clear();
+      for (int k=0; k<taxc.size(); ++k)
+        tmpabs.add(taxc.keys(k).substr(1),taxc.values(k));
+      heapsortr(tmpabs);
+      for (int k=0; k<tmpabs.size(); ++k)
+        cout << i << "\t" << j << "\t" << tmpabs.keys(k) << "\t" << tmpabs.values(k) << endl;
+    }
+  }
+  exit(0);
+}
+
+
 void help()
 {
   printf("MAPseq v%s\n",MAPSEQ_PACKAGE_VERSION);
@@ -3940,6 +4129,10 @@ int emain()
   epregister(tophits);
   epregister(topotus);
   int step=0;
+
+
+  getParser().actions.add("otucounts",actionOTUCounts);
+  getParser().actions.add("otutable",actionOTUTable);
 
 //  epregister(step);
 
