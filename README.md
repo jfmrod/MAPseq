@@ -49,7 +49,25 @@ The mapseq binary will be located in the created directory. You may move the who
 
 ### ii) Installing from source
 
-First make sure you have the gcc compiler / build tools installed. On Ubuntu you would need to run "apt-get install build-essential" with admin priviledges. You will also need the libncurses dev libraries installed: "apt-get install libncurses5-dev"
+To compile from the github source you will need:
+- svn
+- autotools/autoconf
+- wget
+- git
+- libncurses5-dev
+
+On Ubuntu systems you can install these with the command:
+
+sudo apt-get install build-essential wget subversion git libncurses5-dev
+
+
+You can then clone the mapseq repository with:
+
+git clone https://github.com/jfmrod/MAPseq.git
+
+
+Once you have cloned the repository you can type the following commands in the MAPseq directory
+
 
 ./setup.sh      # downloads eutils and the reference data files  
 ./bootstrap     # this step is only needed if you cloned the repository, you will also need to install autotools/autoconf packages  
@@ -57,9 +75,8 @@ First make sure you have the gcc compiler / build tools installed. On Ubuntu you
 make  
 make install  
 
-In the directory where you unpacked the package contents.
-Alternatively, if you want the program to be installed to another
-location instead of the default system wide /usr/local/ directory,
+
+If you want to install MAPseq to your home directory instead of the default system wide /usr/local/ directory,
 you can change the ./configure command to:
 
 ./configure --prefix=$HOME/usr
@@ -146,8 +163,11 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 - Added "-ignoreEmptyTax" option. Prevents 2nd hits with missing taxonomic labels (uncertain annotation) from decreasing the confidence of the top hit assignment.
 
 1.2.3 (2 Oct 2018)
-- Fixed last sequence of database not loading if it missed a newline. Added assert for empty sequences in database.
-- Fixed double line output for the same query sequence with long queries (>1200bp). Only the highest scoring hit is reported now.
+- Fixed missing newline causing last sequence to be missed, added assert on empty sequences
+- Fixed double hits reported when classifying long queries (>1200bp)
+
+- Updated to mapref-2.2b:
+  Removed low quality reference sequences that would cause issues when classifying low quality query sequences.
 
 1.2.2 (30 Oct 2017)
 - Fixed multithreaded race condition causing issues on some systems.
