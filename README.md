@@ -1,5 +1,5 @@
 
-# MAPseq v1.2.4 (27 May 2019)
+# MAPseq v1.2.5 (12 Jul 2019)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -11,8 +11,10 @@ Matias Rodrigues JF, Schmidt TSB, Tackmann J & von Mering C (2017) MAPseq: highl
 
 1. Installation  
 2. MAPseq usage instructions  
- a. default reference  
- b. custom user-provided reference  
+ a. Default reference  
+ b. Custom user-provided reference  
+ c. Single sample counts summary
+ d. OTU count table for multiple samples
 3. File output  
 4. History  
 
@@ -34,8 +36,6 @@ You can get the source code on github or binary packages at:
 
 git clone https://github.com/jfmrod/MAPseq.git
 
-http://meringlab.org/software/mapseq/
-
 
 ### i) Installing the binary package
 
@@ -45,7 +45,8 @@ tar -xvzf mapseq-1.2-linux.tar.gz   # for the linux version
 or  
 tar -xvzf mapseq-1.2-macosx.tar.gz  # for the MacOSX version  
 
-The mapseq binary will be located in the created directory. You may move the whole directory to another location. Moving the binary elsewhere will break the installation though, as the data files are searched for in relation to the binary's path.
+The mapseq binary will be located in the created directory. You may move the whole directory to another location. Moving only the binary elsewhere will break the installation though, as the data files are searched for in relation to the binary's path.
+
 
 ### ii) Installing from source
 
@@ -120,7 +121,8 @@ HE801216:78..1345       Bacteria;Proteobacteria;Gammaproteobacteria;Methylococca
 HE802067:76740..77993   Bacteria;Actinobacteria;Actinobacteria;Corynebacteriales;Corynebacteriaceae;Corynebacterium;Corynebacterium glutamicum  
 HE804045:1012175..1013425       Bacteria;Actinobacteria;Actinobacteria;Pseudonocardiales;Pseudonocardiaceae;Saccharothrix;Saccharothrix espanaensis  
 
-### c) Single Sample Counts
+
+### c) Single sample counts summary
 
 mapseq -otucounts <sample1.mseq>
  
