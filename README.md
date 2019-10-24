@@ -56,10 +56,11 @@ To compile from the github source you will need:
 - wget
 - git
 - libncurses5-dev
+- libtool
 
 On Ubuntu systems you can install these with the command:
 
-sudo apt-get install build-essential wget subversion git libncurses5-dev
+sudo apt-get install build-essential wget subversion git libncurses5-dev libtool
 
 
 You can then clone the mapseq repository with:
