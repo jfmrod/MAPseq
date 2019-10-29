@@ -39,7 +39,7 @@ git clone https://github.com/jfmrod/MAPseq.git
 
 ### i) Installing the binary package
 
-To install the binary package simply unpack the contents of the mapseq tar.gz file, i.e.:
+To install the binary package simply unpack the contents of the mapseq tar.gz file, e.g.:
 
 tar -xvzf mapseq-1.2-linux.tar.gz   # for the linux version  
 or  
