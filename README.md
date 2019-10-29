@@ -39,7 +39,7 @@ git clone https://github.com/jfmrod/MAPseq.git
 
 ### i) Installing the binary package
 
-To install the binary package simply unpack the contents of the mapseq tar.gz file, i.e.:
+To install the binary package simply unpack the contents of the mapseq tar.gz file, e.g.:
 
 tar -xvzf mapseq-1.2-linux.tar.gz   # for the linux version  
 or  
@@ -56,10 +56,11 @@ To compile from the github source you will need:
 - wget
 - git
 - libncurses5-dev
+- libtool
 
 On Ubuntu systems you can install these with the command:
 
-sudo apt-get install build-essential wget subversion git libncurses5-dev
+sudo apt-get install build-essential wget subversion git libncurses5-dev libtool
 
 
 You can then clone the mapseq repository with:
