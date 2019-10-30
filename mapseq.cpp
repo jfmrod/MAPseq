@@ -50,7 +50,10 @@ using namespace std;
 #define KMERMAX2 (1ul<<KMERBITS2)
 #define KMERMASK2 (MAXSIZE2-1ul)
 
-
+#ifndef MAX
+#define MAX(a,b) ((a)>(b)?(a):(b))
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#endif
 
 const uint32_t nuc[]={'a','t','g','c','u'};
 const uint32_t compnuc[]={0x0u,0x1u,0x2u,0x3u,0x1u};

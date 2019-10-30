@@ -6,7 +6,7 @@ tar -Cdata -xvzf mapref-2.2b.tar.gz && mv data/mapref-2.2b/* data/ && rmdir data
 
 if [ ! -d "libs/eutils" ]; then
   mkdir -p libs
-  svn co https://www.konceptfx.com/svn/eutils libs/eutils
+  svn co -r 1194 https://www.konceptfx.com/svn/eutils libs/eutils
 else
   pushd libs/eutils
   svn update
