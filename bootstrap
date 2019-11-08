@@ -3,7 +3,7 @@
 cp README.md README
 if [ ! -d "libs/eutils" ]; then
   mkdir -p libs
-  svn co https://www.konceptfx.com/svn/eutils libs/eutils
+  svn co -r 1194 https://www.konceptfx.com/svn/eutils libs/eutils
 else
   pushd libs/eutils
   svn update
