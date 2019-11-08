@@ -4065,31 +4065,32 @@ void help()
   printf("Example: mapseq -nthreads 4 rawreads.fa\n"); 
   printf("\n"); 
   printf("Optional arguments:\n");
-  printf("%10s    %s\n","-nthreads <nthreads>","number of threads to use [default: 4]");
+  printf("%20s   %5s  %s\n","-nthreads","<int>","number of threads to use [default: 4]");
   printf("\n"); 
-  printf("%10s    %s\n","-tophits","number of reference sequences to include in alignment phase [default: 20]");
-  printf("%10s    %s\n","-topotus","number of internal reference otus to include in alignment phase [default: 10]");
-  printf("Fine tuning search:\n"); 
-  printf("%10s    %s\n","-minscore","minimum score cutoff to consider for a classification, should be reduced when searching very small sequences, i.e.: primer search [default: 30]");
-  printf("%10s    %s\n","-minid1","minimum number of shared kmers to consider hit in second phase kmer search [default: 1]");
-  printf("%10s    %s\n","-minid2","minimum number of shared kmers to consider hit in alignment phase [default: 1]");
-  printf("%10s    %s\n","-otulim","number of sequences per internal cluster to include in alignment phase [default: 50]");
+  printf("Performance/sensitivity:\n");
+  printf("%20s   %5s  %s\n","-tophits","<int>","number of reference sequences to include in alignment phase [default: 20]");
+  printf("%20s   %5s  %s\n","-topotus","<int>","number of internal reference otus to include in alignment phase [default: 10]");
+  printf("\n"); 
+  printf("Search parameters:\n"); 
+  printf("%20s   %5s  %s\n","-minscore","<int>","minimum score cutoff to consider for a classification, should be reduced when searching very small sequences, i.e.: primer search [default: 30]");
+  printf("%20s   %5s  %s\n","-minid1","<int>","minimum number of shared kmers to consider hit in second phase kmer search [default: 1]");
+  printf("%20s   %5s  %s\n","-minid2","<int>","minimum number of shared kmers to consider hit in alignment phase [default: 1]");
+  printf("%20s   %5s  %s\n","-otulim","<int>","number of sequences per internal cluster to include in alignment phase [default: 50]");
+  printf("\n"); 
   printf("Extra information:\n"); 
-  printf("%10s    %s\n","-print_hits","outputs list of top hits for each input sequence");
-  printf("%10s    %s\n","-print_align","outputs alignments");
-  printf("Generating statistics from mapseq output:\n"); 
-  printf("%10s    %s\n","-otucounts <sample1.mseq>","computes summary of classification counts from the output of MAPseq");
-  printf("%10s    %s\n","-otutable <sample1.mseq> [sample2.mseq [...]]","generates a tsv file with taxonomic labels as rows and samples as columns from mapseq output files");
+  printf("%20s   %5s  %s\n","-print_hits","","outputs list of top hits for each input sequence");
+  printf("%20s   %5s  %s\n","-print_align","","outputs alignments");
+  printf("\n"); 
+  printf("Generating count summaries from mapseq output:\n"); 
+  printf("%20s   %s\n","-otucounts","<sample1.mseq>");
+  printf("%20s   %5s  %s\n","","","computes summary of classification counts from the classification output file");
+  printf("%20s   %s\n","-otutable","<sample1.mseq> [sample2.mseq [...]]");
+  printf("%20s   %5s  %s\n","","","generates a tsv file with taxonomic labels as rows and samples as columns from classification output files");
   printf("\n");
-
-//  printf("After clustering:\n");
-//  printf("%10s    %s\n","-makeotus <alignment> <mergelog> <threshold>","generate an OTU file at a given threshold");
-//  printf("%10s    %s\n","-makeotus_mothur <alignment> <mergelog> <threshold>","generate a MOTHUR compatible OTU file at a given threshold");
-//  printf("%10s    %s\n","-makereps <alignment> <otu>","generate a fasta file of OTU representatives. Sequences chosen have the minimum average distance to other sequences in the OTU.");
-//  printf("\n");
 
   printf("Report bugs to: joao.rodrigues@imls.uzh.ch\n");
   printf("http://meringlab.org/software/mapseq/\n");
+  printf("http://github.org/jfmrod/MAPseq/\n");
 
   exit(0);
 }
