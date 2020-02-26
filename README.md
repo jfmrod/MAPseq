@@ -1,5 +1,5 @@
 
-# MAPseq v1.2.4 (27 May 2019)
+# MAPseq v2.0alpha
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -10,9 +10,12 @@ Matias Rodrigues JF, Schmidt TSB, Tackmann J & von Mering C (2017) MAPseq: highl
 ## Table of contents
 
 1. Installation  
-2. MAPseq usage instructions  
- a. default reference  
- b. custom user-provided reference  
+2. MAPseq usage instructions
+ a. Default reference  
+ a2. Paired end mapping
+ b. Custom user-provided reference  
+ c. Single sample counts summar  
+ d. OTU count table for multiple samples  
 3. File output  
 4. History  
 
@@ -41,9 +44,9 @@ http://meringlab.org/software/mapseq/
 
 To install the binary package simply unpack the contents of the mapseq tar.gz file, i.e.:
 
-tar -xvzf mapseq-1.2-linux.tar.gz   # for the linux version  
+tar -xvzf mapseq-2.0alpha-linux.tar.gz   # for the linux version  
 or  
-tar -xvzf mapseq-1.2-macosx.tar.gz  # for the MacOSX version  
+tar -xvzf mapseq-2.0alpha-macosx.tar.gz  # for the MacOSX version  
 
 The mapseq binary will be located in the created directory. You may move the whole directory to another location. Moving the binary elsewhere will break the installation though, as the data files are searched for in relation to the binary's path.
 
@@ -59,7 +62,7 @@ To compile from the github source you will need:
 
 On Ubuntu systems you can install these with the command:
 
-sudo apt-get install build-essential wget subversion git libncurses5-dev
+sudo apt-get install build-essential wget subversion git libncurses5-dev libtool
 
 
 You can then clone the mapseq repository with:
@@ -104,6 +107,17 @@ provided with MAPseq.
 
 You can change the number of threads that MAPseq uses with the -nthreads <no_threads> argument.
 
+### a2) Paired end reads
+
+A new addition in MAPseq 2.0 is the ability to map paired end reads, this is done using the "-paired" option:
+
+mapseq -paired rawseqs1.fa rawseqs2.fa > rawseqs.fa.mseq
+
+For paired end mapping MAPseq performs the search using both paired ends. It also performs the alignment and scoring taking into account
+that both reads belong in principle to the same sequence. This improves the mapping accuracy compared to using only one of the
+reads.
+
+
 ### b) Custom user-provided reference
 
 You can use mapseq with your own fasta reference and taxonomy files with the following command:
@@ -122,7 +136,41 @@ HE802067:76740..77993   Bacteria;Actinobacteria;Actinobacteria;Corynebacteriales
 HE804045:1012175..1013425       Bacteria;Actinobacteria;Actinobacteria;Pseudonocardiales;Pseudonocardiaceae;Saccharothrix;Saccharothrix espanaensis  
 
 
-## 3. FILE OUTPUT
+### c) Single sample counts summary
+
+mapseq -otucounts <sample1.mseq>
+ 
+Provides you with summary counts of the MSEQ output files for each taxonomy and level. Example:
+
+#sample.mseq	102301  
+Taxonomy	TaxonomyLevel	Label	Counts  
+0	0	Bacteria	102301  
+0	1	Bacteria;Bacteroidetes	7586  
+0	1	Bacteria;Firmicutes	2150  
+0	1	Bacteria;Proteobacteria	112  
+0	1	Bacteria;PHY_Coriobacteriia	7  
+0	1	Bacteria;Actinobacteria	4  
+0	1	Bacteria;Fusobacteria	1  
+0	2	Bacteria;Bacteroidetes;Bacteroidia	7585  
+0	2	Bacteria;Firmicutes;Clostridia	1330  
+  
+
+
+### d) OTU count table for multiple samples
+
+mapseq -otutable <sample1.mseq> <sample2.mseq> ...  
+
+Generates a tab separated value (tsv) file with the counts for each sample (column wise) and OTU or taxonomic labels (row wise).
+Which taxomy (OTU or NCBI taxonomy) and levels in the taxonomy can be specified using the -ti and -tl, respectively.  
+
+
+The generated table can be imported into R with the following R command:
+
+myotutable <- read.table("map.otutable",sep="\t",header=TRUE)
+
+
+
+## 3. MSEQ FILE OUTPUT
 
 In the results output, each line indicates a classification of the read. Two output formats can be chosen ("simple" or "confidences") using the --outfmt option.
 
@@ -133,7 +181,7 @@ Each field is tab separated and indicates the following:
 Field  
 1	Query sequence id  
 2	Reference sequence id (highest alignment score)  
-3	Alignment bitscore  
+3	Alignment score  
 4	Pairwise identity  
 5	Matches  
 6	Mismatches  
@@ -160,8 +208,10 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
-1.2.4 (27 May 2019)
-- Added "-ignoreEmptyTax" option. Prevents 2nd hits with missing taxonomic labels (uncertain annotation) from decreasing the confidence of the top hit assignment.
+2.0 alpha (2020)
+- Added paired end read mapping
+1.2.5 (12 Jul 2019)
+- Added "-otucounts" and "-otutable" options to generate count summary for single mapseq (.mseq) files or an otu/taxa table for multiple .mseq files
 
 1.2.3 (2 Oct 2018)
 - Fixed missing newline causing last sequence to be missed, added assert on empty sequences

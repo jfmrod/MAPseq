@@ -3434,11 +3434,11 @@ void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& srev2,earray<epredinfo>&
       adata.mismatches=adata1.mismatches+adata2.mismatches;
       adata.gaps=adata1.gaps+adata2.gaps;
       adata._score=adata1._score+adata2._score;
-//      cout << "pair end: " << adata1.s2 << " " << adata1.e2 << " - " << adata2.s2 << " " << adata2.e2 << endl;
+//      cout << "pair end: " << adata1.s2 << " " << adata1.e2 << " - " << adata2.s2 << " " << adata2.e2 << " " << (adata.revcompl?"-":"+") << " " << seqids[best[l]] << " " << seqs.size() << endl;
       if (adata1.e2 > adata2.s2 && adata2.e2 > adata1.s2){ // some overlap, need to subtract overlap scores and stats
 //        lwarn("overlap: "+estr(adata1.s2)+" "+adata1.e2+" - "+adata2.s2+" "+adata2.e2);
         int tmpscore,tmpmatches,tmpmismatches,tmpgaps;
-        if (adata2.s2 < adata1.s2){ // incorrect order of paired ends, take highest scoring of both alignments
+        if (!adata.revcompl && adata2.s2 < adata1.s2 || adata.revcompl && adata1.s2 < adata2.s2){ // incorrect order of paired ends, take highest scoring of both alignments
 //          lerror("2nd pair end before 1st?");
           adata._score=0; // this is not a correct match, skip this alignment
           if (adata1._score>adata2._score){
@@ -3461,7 +3461,10 @@ void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& srev2,earray<epredinfo>&
             adata._score=adata2._score;
           }
         }else{
-          adata2.partscore(adata2.s2-adata1.s2+1,adata1.e1,tmpscore,tmpmatches,tmpmismatches,tmpgaps,as);
+          if (!adata.revcompl)
+            adata2.partscore(adata2.s2-adata1.s2+1,adata2.e1,tmpscore,tmpmatches,tmpmismatches,tmpgaps,as);
+          else
+            adata1.partscore(adata1.s2-adata2.s2+1,adata1.e1,tmpscore,tmpmatches,tmpmismatches,tmpgaps,as);
 
           adata._score-=tmpscore;
           adata.matches-=tmpmatches;

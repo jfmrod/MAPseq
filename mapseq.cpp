@@ -3013,6 +3013,196 @@ void taskProtsearch()
 }
 */
 
+template <class T>
+void heapsortr(T& arr){
+  heapsort(arr);
+  for (int i=0; i<arr.size()/2; ++i)
+    arr.swap(i,arr.size()-1-i);
+}
+
+
+
+void actionOTUTable()
+{
+  ldieif(getParser().args.size()<2,"syntax: sample1.mseq [sample2.mseq ...]");
+
+  int ti=0;
+  int tl=3;
+  epregisterI(ti,"<integer> choose which taxonomy to make table for, usually OTU (0) or NCBI (1)");
+  epregisterI(tl,"<integer> choose which taxonomic level to make table for, usually OTU 97% (3)");
+  eparseArgs();
+
+  int taxind=-1;
+  egzfile f;
+
+  estr tmptax;
+  int sind,tl1,tli;
+  float cf;
+  earray<earray<estrhashof<eintarray> > > tax;
+  tax.add(earray<estrhashof<eintarray> >());
+
+  eintarray mseqlines;
+  earray<estr> samples;
+
+  for (int l=1; l<getParser().args.size(); ++l){
+    estr run=getParser().args[l];
+    estrarray arr=run.explode("/");
+    samples.add(arr[arr.size()-1]);
+
+    mseqlines.add(0);
+    f.open(getParser().args[1],"r");
+    while (!f.eof() && f.readarr(arr,"\t")){
+      if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
+      if (taxind==-1){
+        for (taxind=0; taxind<arr.size(); ++taxind){
+          if (arr[taxind].len()==0){
+            taxind=taxind+1;
+  //          cout << "taxind: " << taxind << endl;
+            break;
+          }
+        }
+      }
+      ++mseqlines[l-1];
+      sind=taxind;
+      tmptax.clear();
+      tli=0;
+      for (int i=taxind; i<arr.size(); i+=3){
+        if (arr[i].len()==0){
+          ++i;
+          if (i>=arr.size()) break;
+          sind=i;
+          ++tli;
+          if (tax.size()<=tli) tax.add(earray<estrhashof<eintarray> >());
+          tmptax.clear();
+        }
+        tl1=(i-sind)/3;
+        cf=arr[i+1].f();
+  //      cout << arr[i] << " " << cf << endl;
+        if (cf<0.5) continue;
+        tmptax+=";"+arr[i];
+  //      cout << tli << " " << tl << " " << tmptax << " " << cf << endl;
+  
+        earray<estrhashof<eintarray> > &taxonc(tax[tli]);
+  
+        if (taxonc.size()<=tl1) taxonc.add(estrhashof<eintarray>());
+        estrhashof<eintarray> &taxc(taxonc[tl1]);
+        if (!(taxc.exists(tmptax)))
+          taxc.add(tmptax,eintarray());
+        eintarray& taxciarr(taxc[tmptax]);
+        while (taxciarr.size()<l) taxciarr.add(0);
+        ++taxciarr[l-1];
+      }
+    }
+  }
+
+  estrarrayof<int> tmpabs;
+//  cout << ">" << run << "." << readsample << "\t" << mseqlines << endl;
+
+
+  cout << "#TotalCounts:";
+  for (int l=0; l<mseqlines.size(); ++l)
+    cout << "\t" << mseqlines[l];
+
+  cout << endl;
+  for (int l=0; l<samples.size(); ++l)
+    cout << "\t" << samples[l];
+  cout << endl;
+
+
+  ldieif(ti>=tax.size(),"chosen taxonomy number does not exist, please choose a number smaller than "+estr(tax.size()));
+  earray<estrhashof<eintarray> > &taxonc(tax[ti]);
+  ldieif(tl>=taxonc.size(),"chosen taxonomic level does not exist, please choose a number smaller than "+estr(taxonc.size()));
+  estrhashof<eintarray> &taxc(taxonc[tl]);
+  for (int t=0; t<taxc.size(); ++t){
+    cout << taxc.keys(t).substr(1);
+    eintarray& taxciarr(taxc.values(t));
+    for (int l=0; l<mseqlines.size(); ++l)
+      cout << "\t" << (l<taxciarr.size()?taxciarr[l]:0);
+    cout << endl;
+  }
+
+  exit(0);
+}
+
+void actionOTUCounts()
+{
+  ldieif(getParser().args.size()<2,"syntax: sample1.mseq");
+
+  int taxind=-1;
+  egzfile f;
+
+  estr run=getParser().args[1];
+  estrarray arr=run.explode("/");
+  run=arr[arr.size()-1];
+
+  estr tmptax;
+  int sind,tl,tli;
+  float cf;
+  earray<earray<estrhashof<int> > > tax;
+  tax.add(earray<estrhashof<int> >());
+
+  int mseqlines=0;
+  f.open(getParser().args[1],"r");
+  while (!f.eof() && f.readarr(arr,"\t")){
+    if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
+    if (taxind==-1){
+      for (taxind=0; taxind<arr.size(); ++taxind){
+        if (arr[taxind].len()==0){
+          taxind=taxind+1;
+//          cout << "taxind: " << taxind << endl;
+          break;
+        }
+      }
+    }
+    ++mseqlines;
+    sind=taxind;
+    tmptax.clear();
+    tli=0;
+    for (int i=taxind; i<arr.size(); i+=3){
+      if (arr[i].len()==0){
+        ++i;
+        if (i>=arr.size()) break;
+        sind=i;
+        ++tli;
+        if (tax.size()<=tli) tax.add(earray<estrhashof<int> >());
+        tmptax.clear();
+      }
+      tl=(i-sind)/3;
+      cf=arr[i+1].f();
+//      cout << arr[i] << " " << cf << endl;
+      if (cf<0.5) continue;
+      tmptax+=";"+arr[i];
+//      cout << tli << " " << tl << " " << tmptax << " " << cf << endl;
+
+      earray<estrhashof<int> > &taxonc(tax[tli]);
+
+      if (taxonc.size()<=tl) taxonc.add(estrhashof<int>());
+      estrhashof<int> &taxc(taxonc[tl]);
+      if (!(taxc.exists(tmptax)))
+        taxc.add(tmptax,0);
+      ++taxc[tmptax];
+    }
+  }
+
+  estrarrayof<int> tmpabs;
+//  cout << ">" << run << "." << readsample << "\t" << mseqlines << endl;
+  cout << "#" << run << "\t" << mseqlines << endl;
+  cout << "Taxonomy\tTaxonomyLevel\tLabel\tCounts" << endl;
+  for (int i=0; i<tax.size(); ++i){
+    earray<estrhashof<int> > &taxonc(tax[i]);
+    for (int j=0; j<taxonc.size(); ++j){
+      estrhashof<int> &taxc(taxonc[j]);
+      tmpabs.clear();
+      for (int k=0; k<taxc.size(); ++k)
+        tmpabs.add(taxc.keys(k).substr(1),taxc.values(k));
+      heapsortr(tmpabs);
+      for (int k=0; k<tmpabs.size(); ++k)
+        cout << i << "\t" << j << "\t" << tmpabs.keys(k) << "\t" << tmpabs.values(k) << endl;
+    }
+  }
+  exit(0);
+}
+
 
 void help()
 {
@@ -3023,22 +3213,39 @@ void help()
   printf("\n");
   printf("Usage:\n");
   printf("    %s input.fa [<db> <tax1> <tax2> ...]\n",efile(getParser().args[0]).basename()._str);
+  printf("\n  Paired end sequence search:\n");
+  printf("    %s -paired input1.fa input2.fa [<db> <tax1> <tax2> ...]\n",efile(getParser().args[0]).basename()._str);
   printf("\n");
   printf("Classify a fasta file containing sequence reads to the default NCBI taxonomy and OTU classifications.\n");
   printf("Example: mapseq -nthreads 4 rawreads.fa\n"); 
   printf("\n"); 
   printf("Optional arguments:\n");
-  printf("%10s    %s\n","-nthreads","number of threads to use [default: 4]");
+  printf("%20s   %5s  %s\n","-nthreads","<int>","number of threads to use [default: 4]");
+  printf("\n"); 
+  printf("Performance/sensitivity:\n");
+  printf("%20s   %5s  %s\n","-tophits","<int>","number of reference sequences to include in alignment phase [default: 20]");
+  printf("%20s   %5s  %s\n","-topotus","<int>","number of internal reference otus to include in alignment phase [default: 10]");
+  printf("\n"); 
+  printf("Search parameters:\n"); 
+  printf("%20s   %5s  %s\n","-minscore","<int>","minimum score cutoff to consider for a classification, should be reduced when searching very small sequences, i.e.: primer search [default: 30]");
+  printf("%20s   %5s  %s\n","-minid1","<int>","minimum number of shared kmers to consider hit in second phase kmer search [default: 1]");
+  printf("%20s   %5s  %s\n","-minid2","<int>","minimum number of shared kmers to consider hit in alignment phase [default: 1]");
+  printf("%20s   %5s  %s\n","-otulim","<int>","number of sequences per internal cluster to include in alignment phase [default: 50]");
+  printf("\n"); 
+  printf("Extra information:\n"); 
+  printf("%20s   %5s  %s\n","-print_hits","","outputs list of top hits for each input sequence");
+  printf("%20s   %5s  %s\n","-print_align","","outputs alignments");
+  printf("\n"); 
+  printf("Generating count summaries from mapseq output:\n"); 
+  printf("%20s   %s\n","-otucounts","<sample1.mseq>");
+  printf("%20s   %5s  %s\n","","","computes summary of classification counts from the classification output file");
+  printf("%20s   %s\n","-otutable","<sample1.mseq> [sample2.mseq [...]]");
+  printf("%20s   %5s  %s\n","","","generates a tsv file with taxonomic labels as rows and samples as columns from classification output files");
   printf("\n");
-
-//  printf("After clustering:\n");
-//  printf("%10s    %s\n","-makeotus <alignment> <mergelog> <threshold>","generate an OTU file at a given threshold");
-//  printf("%10s    %s\n","-makeotus_mothur <alignment> <mergelog> <threshold>","generate a MOTHUR compatible OTU file at a given threshold");
-//  printf("%10s    %s\n","-makereps <alignment> <otu>","generate a fasta file of OTU representatives. Sequences chosen have the minimum average distance to other sequences in the OTU.");
-//  printf("\n");
 
   printf("Report bugs to: joao.rodrigues@imls.uzh.ch\n");
   printf("http://meringlab.org/software/mapseq/\n");
+  printf("http://github.org/jfmrod/MAPseq/\n");
 
   exit(0);
 }
@@ -3647,12 +3854,13 @@ void actionClusterCompress()
 
 void actionPairend()
 {
-  cout << "Paired end" << endl;
+  cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
+  ldieif(getParser().args.size()<3,"not enough arguments, syntax: mapseq -paired <paired1.fna> <paired2.fna> [db] [[tax1] [tax2] ...]");
+  cerr << "# threads: "<< nthreads << endl;
 
   loadSequences(db,3);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
-  ldieif(getParser().args.size()<3,"not enough arguments, syntax: mapseq -paired <paired1.fna> <paired2.fna> [db] [[tax1] [tax2] ...]");
   loadTaxonomy(db,4);
 
   initDB(db,3);
@@ -3954,7 +4162,6 @@ int emain()
 //  epregisterClassInheritance(eoption<outfmt_fd>,ebaseoption);
 
   getParser().onHelp=help;
-  cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
   initdlt();
   bool fastq=false;
 
@@ -4004,6 +4211,11 @@ int emain()
   getParser().actions.add("psearch",actionProtSearch);
 //  getParser().actions.add("daemon",actionDaemon);
 
+  getParser().actions.add("otucounts",actionOTUCounts);
+  getParser().actions.add("otutable",actionOTUTable);
+
+
+
 //  epregisterClassMethod4(eoption<outfmt_fd>,operator=,int,(const estr& val),"=");
 
 
@@ -4026,11 +4238,14 @@ int emain()
 
 //  epregister(kmer);
   eparseArgs();
+  cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
 
   if(getParser().args.size()<2){
     cout << "syntax: mapseq <query> [db] [tax] [tax2] ..." << endl;
+    cout << "mapseq -h for more help" << endl;
     return(0);
   }
+  cerr << "# threads: "<< nthreads << endl;
 
 /*
   estrhash ignseqs;
