@@ -96,6 +96,8 @@ estr outfmt_confidences(const etax& tax,const earrayof<double,int>& ptax,const e
 class eseqdb
 {
  public:
+  int minscore;
+
   estrarrayof<eseq> seqs;
   estrhashof<int> seqind;
   eintarray seqotu;
@@ -169,7 +171,7 @@ extern int minid1;
 extern int minid2;
 extern int topotus;
 extern int tophits;
-extern int minscore;
+//extern int minscore;
 extern int otulim;
 extern float sweight;
 extern float sweightabs;

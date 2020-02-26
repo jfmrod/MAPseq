@@ -212,6 +212,9 @@ void initdlt()
     d1_lt[i]=i;
 }
 
+
+eseqdb db;
+
 /*
 void seqident_seg_left(const eseq& s1,int p1,const eseq& s2,int p2,ealigndata& adata,const ealignscore& as){
   unsigned long *pstr1=reinterpret_cast<unsigned long*>(s1.seq._str);
@@ -3583,7 +3586,6 @@ void actionCluster()
 {
   cerr << "Clustering: loading database" << endl;
 
-  eseqdb db;
   db.otukmers.init(MAXSIZE);
   mtdata.seqdb=&db;
 
@@ -3602,7 +3604,6 @@ void actionClusterDB()
 {
   cerr << "ClusterDB: loading database" << endl;
 
-  eseqdb db;
   db.otukmers.init(MAXSIZE);
   mtdata.seqdb=&db;
   mtdata.finished=false;
@@ -3628,7 +3629,6 @@ void actionClusterCompress()
 {
   cerr << "Compressing: denovo reference" << endl;
 
-  eseqdb db;
   db.otukmers.init(MAXSIZE);
   mtdata.seqdb=&db;
   nthreads=1;
@@ -3647,7 +3647,8 @@ void actionClusterCompress()
 
 void actionPairend()
 {
-  eseqdb db;
+  cout << "Paired end" << endl;
+
   loadSequences(db,3);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
@@ -3783,7 +3784,6 @@ estr mapseq(const estr& fastr,eseqdb& db,estrhash& sids)
 
 void actionDaemon()
 {
-  eseqdb db;
   estrhash sids;
   epregisterFuncD(mapseq,evararray(evarRef(db),evarRef(sids)));
   eparseArgs();
@@ -3805,7 +3805,6 @@ void actionDaemon()
 void actionProtSearch()
 {
   ldieif(getParser().args.size()<3,"syntax: <query.fna> <db.faa> [db.tax]");
-  eseqdb db;
   loadProtSequences(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
@@ -3828,7 +3827,6 @@ void actionLoadTaxBinary()
 
 //  nocluster=true;
 
-  eseqdb db;
   db.loadSequencesBinary(getParser().args[1]);
   cerr << "# seqs laoded: " << db.seqs.size() << endl;
   loadTaxonomyBinary(db,getParser().args[2]);
@@ -3850,7 +3848,6 @@ void actionLoadBinary()
   cerr << "Convert: loading database" << endl;
   ldieif(getParser().args.size()<2,"syntax: <db.msfna>");
 
-  eseqdb db;
   db.loadSequencesBinary(getParser().args[1]);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
   ldieif(db.seqs.size()==0,"empty database");
@@ -3865,7 +3862,6 @@ void actionConvertTax()
 
   nocluster=true;
 
-  eseqdb db;
   loadSequences(db,1);
   loadTaxonomy(db,2);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
@@ -3883,7 +3879,6 @@ void actionConvert()
 
   nocluster=true;
 
-  eseqdb db;
   loadSequences(db,1);
   initDB(db,1);
 
@@ -3898,7 +3893,6 @@ void actionCompress()
 {
   cerr << "Compressing: loading database" << endl;
 
-  eseqdb db;
   loadSequences(db);
   initDB(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
@@ -3914,7 +3908,6 @@ void actionDecompress()
 {
   cerr << "loading database" << endl;
 
-  eseqdb db;
   loadSequences(db);
   initDB(db);
   cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
@@ -3958,6 +3951,8 @@ void actionDecompress()
 
 int emain()
 {
+//  epregisterClassInheritance(eoption<outfmt_fd>,ebaseoption);
+
   getParser().onHelp=help;
   cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
   initdlt();
@@ -3976,7 +3971,7 @@ int emain()
   epregister(lambda);
   epregister2(mtdata.print_hits,"print_hits");
   epregister2(mtdata.print_align,"print_align");
-  epregister(minscore);
+  epregister2(db.minscore,"minscore");
   epregister(minid1);
   epregister(minid2);
   epregister(cfthres);
@@ -3991,7 +3986,11 @@ int emain()
   outfmt.choice=0;
   outfmt.add("confidences",outfmt_confidences);
   outfmt.add("simple",outfmt_simple);
+  epregister(outfmt);
 
+  daemonArgs(actionDaemon);
+
+  epregisterAction("paired",actionPairend);
   getParser().actions.add("clusterdb",actionClusterDB);
   getParser().actions.add("cluster",actionCluster);
   getParser().actions.add("clustercompress",actionClusterCompress);
@@ -4001,15 +4000,12 @@ int emain()
   getParser().actions.add("loadbinary",actionLoadBinary);
   getParser().actions.add("loadtaxbinary",actionLoadTaxBinary);
   getParser().actions.add("decompress",actionDecompress);
-  getParser().actions.add("paired",actionPairend);
+//  getParser().actions.add("paired",actionPairend);
   getParser().actions.add("psearch",actionProtSearch);
 //  getParser().actions.add("daemon",actionDaemon);
-  daemonArgs(actionDaemon);
 
-  epregisterClassInheritance(eoption<outfmt_fd>,ebaseoption);
 //  epregisterClassMethod4(eoption<outfmt_fd>,operator=,int,(const estr& val),"=");
 
-  epregister(outfmt);
 
   epregisterFunc(help);
   
@@ -4035,8 +4031,6 @@ int emain()
     cout << "syntax: mapseq <query> [db] [tax] [tax2] ..." << endl;
     return(0);
   }
-
-  eseqdb db;
 
 /*
   estrhash ignseqs;

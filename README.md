@@ -1,5 +1,5 @@
 
-# MAPseq v1.2.3 (2 Oct 2018)
+# MAPseq v1.2.4 (27 May 2019)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -160,6 +160,9 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+1.2.4 (27 May 2019)
+- Added "-ignoreEmptyTax" option. Prevents 2nd hits with missing taxonomic labels (uncertain annotation) from decreasing the confidence of the top hit assignment.
+
 1.2.3 (2 Oct 2018)
 - Fixed missing newline causing last sequence to be missed, added assert on empty sequences
 - Fixed double hits reported when classifying long queries (>1200bp)
