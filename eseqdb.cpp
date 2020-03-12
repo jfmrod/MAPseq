@@ -2478,7 +2478,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //        otukmers[v&KMERMASK]=new deque<int>();
 //        otukmers[v&KMERMASK]->reserve(1000);
 //      }
-      otukmers[v&KMERMASK].add(i);
+      otukmers[v&KMERMASK].push_back(i);
     }
   }
   v=pstr[p/32u]>>(2u*(p%32u));
@@ -2491,7 +2491,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //      otukmers[v&KMERMASK]=new deque<int>();
 //      otukmers[v&KMERMASK]->reserve(1000);
 //    }
-    otukmers[v&KMERMASK].add(i);
+    otukmers[v&KMERMASK].push_back(i);
   }
 }
 
@@ -2512,7 +2512,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //        otukmers[v&KMERMASK]=new deque<int>();
 //        otukmers[v&KMERMASK]->reserve(1000);
 //      }
-      otukmers[v&KMERMASK].add(i);
+      otukmers[v&KMERMASK].push_back(i);
     }
   }
   v=pstr[p/32u]>>(2u*(p%32u));
@@ -2525,7 +2525,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //      otukmers[v&KMERMASK]=new deque<int>();
 //      otukmers[v&KMERMASK]->reserve(1000);
 //    }
-    otukmers[v&KMERMASK].add(i);
+    otukmers[v&KMERMASK].push_back(i);
   }
 }
 
@@ -3963,7 +3963,7 @@ void eseqdb::makeClusterMT(ethreads& t) //,const estr& cfile)
 //  db.otukmers.init(MAXSIZE);
   for (uint32_t i=0; i<MAXSIZE; ++i){
     if (akmers[i&0xFu]==0u) continue;
-    otukmers[i].reservep(seqs.size());
+//    otukmers[i].reserve(seqs.size());
   }
 
   eintarray &len_si(mtdata.len_si);

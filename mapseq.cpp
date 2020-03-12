@@ -2256,7 +2256,7 @@ void otuaddkmerdiff(ebasicarray<ekmerarray>& otukmers,eseq& s1,eseq& s2,eintarra
     for (int k=0; k<32-KMERSIZE; ++k,v>>=2u){
       if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
       if (tmpkmers[v&KMERMASK]!=ti) // kmer not in new sequence
-        otukmers[v&KMERMASK].add(pi|(1u<<31u));
+        otukmers[v&KMERMASK].push_back(pi|(1u<<31u));
       tmpkmers[v&KMERMASK]=-ti;
     }
   }
@@ -2265,7 +2265,7 @@ void otuaddkmerdiff(ebasicarray<ekmerarray>& otukmers,eseq& s1,eseq& s2,eintarra
   for (int k=0; p+k<long(s1.seqlen)-long(KMERSIZE); ++k,v>>=2u){
     if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
     if (tmpkmers[v&KMERMASK]!=ti) // kmer not in new sequence
-      otukmers[v&KMERMASK].add(pi|(1u<<31u));
+      otukmers[v&KMERMASK].push_back(pi|(1u<<31u));
     tmpkmers[v&KMERMASK]=-ti;
   }
 
@@ -2277,7 +2277,7 @@ void otuaddkmerdiff(ebasicarray<ekmerarray>& otukmers,eseq& s1,eseq& s2,eintarra
     for (int k=0; k<32-KMERSIZE; ++k,v>>=2u){
       if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
       tmpkmers[v&KMERMASK]=-ti;
-      otukmers[v&KMERMASK].add(pi);
+      otukmers[v&KMERMASK].push_back(pi);
     }
   }
   v=pstr[p/32u]>>(2u*(p%32u));
@@ -2285,7 +2285,7 @@ void otuaddkmerdiff(ebasicarray<ekmerarray>& otukmers,eseq& s1,eseq& s2,eintarra
   for (int k=0; p+k<long(s2.seqlen)-long(KMERSIZE); ++k,v>>=2u){
     if (akmers[v&akmask]==0x0u || tmpkmers[v&KMERMASK]==-ti) continue; // only add allowed kmers 
     tmpkmers[v&KMERMASK]=-ti;
-    otukmers[v&KMERMASK].add(pi);
+    otukmers[v&KMERMASK].push_back(pi);
   }
 }
 
@@ -2310,7 +2310,7 @@ void otukmerprotadd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& t
 //        otukmers[v&KMERMASK]=new deque<int>();
 //        otukmers[v&KMERMASK]->reserve(1000);
 //      }
-      otukmers[v&PKMERMASK].add(i);
+      otukmers[v&PKMERMASK].push_back(i);
     }
   }
 //  p=(p/3)*3;
@@ -2324,7 +2324,7 @@ void otukmerprotadd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& t
 //      otukmers[v&KMERMASK]=new deque<int>();
 //      otukmers[v&KMERMASK]->reserve(1000);
 //    }
-    otukmers[v&PKMERMASK].add(i);
+    otukmers[v&PKMERMASK].push_back(i);
   }
 }
 
