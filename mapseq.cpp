@@ -3050,7 +3050,7 @@ void actionOTUTable()
     samples.add(arr[arr.size()-1]);
 
     mseqlines.add(0);
-    f.open(getParser().args[1],"r");
+    f.open(getParser().args[l],"r");
     while (!f.eof() && f.readarr(arr,"\t")){
       if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
       if (taxind==-1){
@@ -3093,6 +3093,7 @@ void actionOTUTable()
         ++taxciarr[l-1];
       }
     }
+    f.close();
   }
 
   estrarrayof<int> tmpabs;
@@ -3875,6 +3876,78 @@ void actionPairend()
   exit(0);
 }
 
+void actionChimera()
+{
+  cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
+  ldieif(getParser().args.size()<2,"not enough arguments, syntax: mapseq -chimera <seqs.fna>");
+
+  loadSequences(db,1);
+  initDB(db,1);
+
+  ethreads t;
+  t.setThreads(nthreads);
+
+  esearchws searchws(db);
+  earray<epredinfo> pinfoarr,pinfoarrfull,pinfoarr2,pinfoarrpart;
+  ldieif(db.seqs.size()==0,"empty db");
+
+  int si=0;
+  if (getParser().args.size()>2){
+    if (!db.seqind.exists(getParser().args[2]))
+      ldie("sequence not found: "+getParser().args[2]);
+    si=db.seqind[getParser().args[2]];
+  }
+
+/*
+  otulim=0;
+  tophits=100;
+  topotus=100;
+*/
+
+  for (; si<db.seqs.size(); ++si){
+    eseq s(db.seqs.values(si).subseq(100,300));
+    db.seqsearch_global(db.seqs.keys(si),s,pinfoarr,searchws);
+    db.seqsearch_global(db.seqs.keys(si),db.seqs.values(si),pinfoarr2,searchws);
+    db.seqalign_global(db.seqs.keys(si),db.seqs.values(si),pinfoarr,pinfoarrfull,searchws);
+    db.seqalign_global(db.seqs.keys(si),s,pinfoarr2,pinfoarrpart,searchws);
+  //  db.seqsearch(db.seqs.keys(0),db.seqs.values(0),pinfoarr,searchws);
+  
+  
+    ldieif(pinfoarr.size()==0,"no matches");
+    ldieif(pinfoarr.size()!=pinfoarrfull.size(),"pinfoarr.size() != pinfoarrfull.size()");
+    ldieif(pinfoarr[0].matchcounts.size()!=pinfoarrfull[0].matchcounts.size(),"pinfoarr.matchcounts.size() != pinfoarrfull.matchcounts.size() : "+estr(pinfoarrfull[0].matchcounts.size()));
+   
+    epredinfo& pinfo2(pinfoarr2[0]);
+    epredinfo& pinfopart(pinfoarrpart[0]);
+    for (int l=pinfo2.matchcounts.size()-1; l>=0 && l>=pinfo2.matchcounts.size()-50; --l){
+      ealigndata& adata2(pinfo2.matchcounts[l]);
+      ealigndata& adatap(pinfopart.matchcounts[l]);
+      cout << db.seqs.keys(si)+"\tglobal "+(pinfo2.matchcounts.size()-l-1)+"\t"+db.seqs.keys(adata2.seqid)+"\t"+adata2.score()+"\t"+adata2.identity()+"\t"+adatap.score()+"\t"+adatap.identity()+"\t"+adata2.matches+"\t"+adata2.mismatches+"\t"+adata2.gaps+"\t"+(s.seqstart+adata2.s1)+"\t"+(s.seqstart+adata2.e1)+"\t"+adata2.s2+"\t"+adata2.e2+"\t"+(adata2.revcompl?"-":"+") << endl;
+    }
+    epredinfo& pinfo(pinfoarr[0]);
+    epredinfo& pinfofull(pinfoarrfull[0]);
+    for (int l=pinfo.matchcounts.size()-1; l>=0 && l>=pinfo.matchcounts.size()-50; --l){
+      ealigndata& adata(pinfo.matchcounts[l]);
+      ealigndata& adatafull(pinfofull.matchcounts[l]);
+      cout << db.seqs.keys(si)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+db.seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adatafull.score()+"\t"+adatafull.identity()+"\t"+adatafull.matches+"\t"+adatafull.mismatches+"\t"+adatafull.gaps+"\t"+(s.seqstart+adatafull.s1)+"\t"+(s.seqstart+adatafull.e1)+"\t"+adatafull.s2+"\t"+adatafull.e2+"\t"+(adatafull.revcompl?"-":"+")+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+") << endl;
+  
+  
+  /*
+      int tmpmatch,tmpmismatch,tmpgaps;
+      double tmpid,tmpid2,tmpid3,tmpscore,tmpscore2,tmpscore3;
+      for (int i=100; i+100<s.seqlen; i+=100){
+        adata.partscore_global(0,i,tmpscore,tmpid,tmpmatch,tmpmismatch,tmpgaps,as);
+        adata.partscore_global(i,s.seqlen,tmpscore2,tmpid2,tmpmatch,tmpmismatch,tmpgaps,as);
+        adata.partscore_global(i-100,i+100,tmpscore3,tmpid3,tmpmatch,tmpmismatch,tmpgaps,as);
+  
+        cout << i << "\t" << tmpid << "\t" << tmpid2 << "\t" << tmpid3 << "\t" << tmpid/tmpid2 << endl;
+      }
+  */
+    }
+  }
+  exit(0);
+}
+
 estr mapseq(const estr& fastr,eseqdb& db,estrhash& sids)
 {
   if (!fastr.len()) return("{\"error\":\"empty query\"}"); 
@@ -4213,6 +4286,7 @@ int emain()
 
   getParser().actions.add("otucounts",actionOTUCounts);
   getParser().actions.add("otutable",actionOTUTable);
+  getParser().actions.add("chimera",actionChimera);
 
 
 

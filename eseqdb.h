@@ -127,6 +127,8 @@ class eseqdb
   void seqsearchpair(const estr& id,eseq& s,eseq& s2,earray<epredinfo>& pinfoarr,esearchws& sws);
   void pseqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws);
 
+  void seqalign_global(const estr& str2id,eseq& s,earray<epredinfo>& previnfoarr,earray<epredinfo>& pinfoarr,esearchws& sws);
+
   void processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t);
   void processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t);
   void processQueryPairend(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t);

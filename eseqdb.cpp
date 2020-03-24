@@ -3189,6 +3189,69 @@ void eseqdb::seqsearch_global(const estr& str2id,eseq& s,earray<epredinfo>& pinf
 //  ta=ta*0.99+t1.lap()*0.01;
 }
 
+
+void eseqdb::seqalign_global(const estr& str2id,eseq& s,earray<epredinfo>& previnfoarr,earray<epredinfo>& pinfoarr,esearchws& sws)
+{
+  pinfoarr.clear();
+
+  epredinfo pinfo;
+  long s_start=0;
+  long s_end=s.seqlen;
+  long s_len=s_end-s_start;
+
+  eseq srev;
+  srev.setrevcompl(s,s_start,s_end);
+
+  if (sws.offset+(unsigned int)(s_len)<sws.offset){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
+    sws.offset=1u;
+    sws.kmerpos.init(MAXSIZE,0u);
+    sws.kmerposrev.init(MAXSIZE,0u);
+  }
+  setkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
+  setkmerpos(sws.kmerposrev,srev,sws.offset);
+
+  for (int l=0; l<previnfoarr[0].matchcounts.size(); ++l){
+//    epinfo &pinfo(previnfoarr[l]);
+    ealigndata &prevadata(previnfoarr[0].matchcounts[l]);
+
+    int sbest=prevadata.seqid;
+    eseq &sdb(seqs.values(sbest));
+    if (sws.offset2+(unsigned int)(seqs.values(sbest).seqlen)<sws.offset2){  // need an unsigned int here otherwise the comparison is made in long and the offset is not correctly reset, signed int overflows are undefined so this cannot be done with signed ints either
+      sws.offset2=1u;
+      sws.kmerpos2.init(MAXSIZE,0);
+    }
+    setkmerpos(sws.kmerpos2,seqs.values(sbest),sws.offset2);
+
+    ealigndata adata;
+    adata.seqid=sbest;
+    adata.revcompl=prevadata.revcompl;
+//    adata.kmercount=sws.idcount[best[l]];
+  
+    if (!prevadata.revcompl){
+      seqident_global(str2id,seqs.keys(sbest),s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
+    }else{
+      seqident_global(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata,sws,as);
+      int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
+      adata.revcompl=true;
+    }
+    adata.globalalign(as);
+//    if (adata.matches+adata.mismatches>0 && adata.score()>=minscore){
+      pinfo.matchcounts.add(adata);
+//    }
+
+    sws.offset2+=seqs.values(sbest).seqlen;
+  }
+  sws.offset+=s_len;
+
+//  if (pinfo.matchcounts.size()>0){
+//    heapsort(pinfo.matchcounts);
+    pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
+    pinfo.seqid=pinfo.tophit.seqid;
+    pinfoarr.add(pinfo);
+//  }
+}
+
+
 void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& srev2,earray<epredinfo>& pinfoarr,esearchws& sws)
 {
   //t1.reset();

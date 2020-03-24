@@ -1857,6 +1857,152 @@ void ealigndata::globalalign(const ealignscore& as)
   gaps=tgaps;
 }
 
+void ealigndata::partscore(int ps,int pe,double& tmpscore,double& tmpid,int& tmpmatch,int& tmpmismatch,int& tmpgaps,const ealignscore& as)
+{
+//  uint64_t *ps1=reinterpret_cast<uint64_t*>(seq1.seq._str);
+//  ldieif(s1<0 || s1>seq1.seqlen || e1<0 || e1>seq1.seqlen,"start/end mismatch with sequence: "+estr(s1)+","+e1+" seqlen: "+seq1.seqlen);
+//  eseq srev(seq1);
+//  long ts1=s1,te1=e1;
+//  if (revcompl){
+//    ts1=seq1.seqlen-e1; te1=seq1.seqlen-s1;
+//    srev.revcompl();
+//    srev.setrevcompl(seq1,0,seq1.seqlen);
+//    ps1=reinterpret_cast<uint64_t*>(srev.seq._str);
+//  }
+  int i=s1;
+  tmpscore=0;
+  tmpmatch=0;
+  tmpmismatch=0;
+  tmpgaps=0;
+  int ts=0;
+  for (int k=0; k<profile.elm.size(); ++k){
+    ealignelem& e(profile.elm[k]);
+    switch (e.type){
+      case AT_MATCH:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.match; // need to adjust for intersecting case
+          tmpmatch+=ts;
+        }
+        i+=e.count;
+       break;
+      case AT_MISS:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.mismatch; // need to adjust for intersecting case
+          tmpmismatch+=ts;
+        }
+        i+=e.count;
+       break;
+      case AT_DEL:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.gapext+as.gapopen; // need to adjust for intersecting case
+          tmpgaps+=ts;
+        }
+       break;
+      case AT_INS:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.gapext+as.gapopen; // need to adjust for intersecting case
+          tmpgaps+=ts;
+        }
+        i+=e.count;
+       break;
+    }
+    if (i>pe) break;
+  }
+  tmpid=double(tmpmatch)/double(tmpmatch+tmpgaps+tmpmismatch);
+}
+
+void ealigndata::partscore_global(int ps,int pe,double& tmpscore,double& tmpid,int& tmpmatch,int& tmpmismatch,int& tmpgaps,const ealignscore& as)
+{
+//  uint64_t *ps1=reinterpret_cast<uint64_t*>(seq1.seq._str);
+//  ldieif(s1<0 || s1>seq1.seqlen || e1<0 || e1>seq1.seqlen,"start/end mismatch with sequence: "+estr(s1)+","+e1+" seqlen: "+seq1.seqlen);
+//  eseq srev(seq1);
+//  long ts1=s1,te1=e1;
+//  if (revcompl){
+//    ts1=seq1.seqlen-e1; te1=seq1.seqlen-s1;
+//    srev.revcompl();
+//    srev.setrevcompl(seq1,0,seq1.seqlen);
+//    ps1=reinterpret_cast<uint64_t*>(srev.seq._str);
+//  }
+  int i=s1;
+  tmpscore=0;
+  tmpmatch=0;
+  tmpmismatch=0;
+  tmpgaps=0;
+  int ts=0;
+  for (int k=0; k<profile.elm.size(); ++k){
+    ealignelem& e(profile.elm[k]);
+    switch (e.type){
+      case AT_MATCH:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.match; // need to adjust for intersecting case
+          tmpmatch+=ts;
+        }
+        i+=e.count;
+       break;
+      case AT_MISS:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.mismatch; // need to adjust for intersecting case
+          tmpmismatch+=ts;
+        }
+        i+=e.count;
+       break;
+      case AT_DEL:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.gapext+as.gapopen; // need to adjust for intersecting case
+          tmpgaps+=ts;
+        }
+       break;
+      case AT_INS:
+        if (i+e.count > ps && pe > i){
+          ts=e.count;
+          if (i < ps) ts=e.count-ps+i;
+          else if (i+e.count > pe) ts=pe-i; // e.count-i-e.count+e; 
+          tmpscore+=ts*as.gapext+as.gapopen; // need to adjust for intersecting case
+          tmpgaps+=ts;
+        }
+        i+=e.count;
+       break;
+    }
+    if (i>pe) break;
+  }
+  if (profile.elm.size() && (profile.elm[0].type==AT_DEL || profile.elm[0].type==AT_INS)){
+    if (ps < profile.elm[0].count)
+      tmpgaps-=profile.elm[0].count-ps;
+  }
+  int tmppos=0;
+  for (int i=0; i<profile.elm.size()-1; ++i){
+    if (profile.elm[i].type==AT_INS) continue;
+    tmppos+=profile.elm[i].count;
+  }
+
+  if (profile.elm.size() && (profile.elm[profile.elm.size()-1].type==AT_DEL || profile.elm[profile.elm.size()-1].type==AT_INS)){
+    if (tmppos < pe)
+      tmpgaps-=profile.elm[profile.elm.size()-1].count-pe+tmppos;
+  }
+  tmpid=double(tmpmatch)/double(tmpmatch+tmpgaps+tmpmismatch);
+}
+
 void ealigndata::partscore(int ps,int pe,int& tmpscore,int& tmpmatch,int& tmpmismatch,int& tmpgaps,const ealignscore& as)
 {
 //  uint64_t *ps1=reinterpret_cast<uint64_t*>(seq1.seq._str);

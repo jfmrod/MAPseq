@@ -89,6 +89,8 @@ class ealigndata {
   ealigndata(): _eval(1.0),_score(0.0),s1(-1),e1(-1),s2(-1),e2(-1),matches(0),mismatches(0),gaps(0),aln(0x00) {}
 //  double score() const { return(matches*matchcost + mismatches*misscost + gaps*gapcost); }
   void partscore(int s,int e,int& tmpscore,int& tmpmatch,int& tmpmismatch,int& tmpgaps,const ealignscore& as);
+  void partscore(int s,int e,double& tmpscore,double& tmpid,int& tmpmatch,int& tmpmismatch,int& tmpgaps,const ealignscore& as);
+  void partscore_global(int s,int e,double& tmpscore,double& tmpid,int& tmpmatch,int& tmpmismatch,int& tmpgaps,const ealignscore& as);
   estr compress(const eseq& s1);
   estr align_str(const eseq& s1,const eseq& s2);
   estr palign_str(const eseq& s1,const eseq& s2);
