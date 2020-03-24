@@ -1,5 +1,5 @@
 
-# MAPseq v1.2.5 (12 Jul 2019)
+# MAPseq v1.2.6 (24 Mar 2020)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -200,6 +200,9 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+1.2.6 (24 Mar 2020)
+- Fixed "-otutable" option using only counts from first sample.
+
 1.2.5 (12 Jul 2019)
 - Added "-otucounts" and "-otutable" options to generate count summary for single mapseq (.mseq) files or an otu/taxa table for multiple .mseq files
 
