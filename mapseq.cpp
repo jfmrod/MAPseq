@@ -3897,7 +3897,7 @@ void actionOTUTable()
     samples.add(arr[arr.size()-1]);
 
     mseqlines.add(0);
-    f.open(getParser().args[1],"r");
+    f.open(getParser().args[l],"r");
     while (!f.eof() && f.readarr(arr,"\t")){
       if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
       if (taxind==-1){
@@ -3940,6 +3940,7 @@ void actionOTUTable()
         ++taxciarr[l-1];
       }
     }
+    f.close();
   }
 
   estrarrayof<int> tmpabs;
@@ -4197,7 +4198,7 @@ int emain()
 
 
   
-  efile f;
+  egzfile f;
   estr line;
   estrarray args;
 
@@ -4602,7 +4603,7 @@ int emain()
   emutex m;
  
   if (estr(getParser().args[1])=="-")
-    f.open(stdin);
+    f.open(stdin,"r");
   else
     f.open(getParser().args[1],"r");
 
