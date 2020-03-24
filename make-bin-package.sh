@@ -1,6 +1,6 @@
 #!/bin/bash
 
-MSEQVER=1.2.5
+MSEQVER=1.2.6
 
 ./configure --prefix=`pwd`/mapseq-$MSEQVER-linux --bindir=`pwd`/mapseq-$MSEQVER-linux --enable-makestatic LIBS="-lgpm -ltermcap" CXXFLAGS="-O2"
 make install
