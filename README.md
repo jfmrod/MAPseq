@@ -36,6 +36,9 @@ You can get the source code on github or binary packages at:
 
 git clone https://github.com/jfmrod/MAPseq.git
 
+The binary packages can be found in the "Releases" page on GitHub:
+https://github.com/jfmrod/MAPseq/releases
+
 
 ### i) Installing the binary package
 
