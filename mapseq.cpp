@@ -3254,11 +3254,11 @@ void help()
 
 void loadProtSequences(eseqdb& db,int argi=2)
 {
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
   if (getParser().args.size()>argi)
     dbfile=getParser().args[argi];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
   estr str2id,str2seq,line;
@@ -3326,22 +3326,22 @@ void loadProtSequences(eseqdb& db,int argi=2)
 
 void loadSequences(eseqdb& db,int argi=2)
 {
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
   if (getParser().args.size()>argi)
     dbfile=getParser().args[argi];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
   db.loadSequences(dbfile);
 }
 
 void initDB(eseqdb& db,int argi=2){
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2.fna";
+  estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
   if (getParser().args.size()>argi)
     dbfile=getParser().args[argi];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
   db.init(dbfile,nocluster,outfmt.value());
@@ -3754,13 +3754,13 @@ void loadTaxonomy(eseqdb& db,int argi=3)
       db.loadTaxonomy(getParser().args[i]);
     }
   }else if (getParser().args.size()<argi){ // do not automatically load taxonomy if database is specified
-    if (efile(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax").exists()){
-      db.loadTaxonomy(estr(DATAPATH)+"/mapref-2.2.fna.ncbitax");
-      db.loadTaxonomy(estr(DATAPATH)+"/mapref-2.2.fna.otutax");
+    if (efile(estr(DATAPATH)+"/mapref-2.2b.fna.ncbitax").exists()){
+      db.loadTaxonomy(estr(DATAPATH)+"/mapref-2.2b.fna.ncbitax");
+      db.loadTaxonomy(estr(DATAPATH)+"/mapref-2.2b.fna.otutax");
 //      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
-    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax").exists()){
-      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.ncbitax");
-      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2.fna.otutax");
+    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna.ncbitax").exists()){
+      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna.ncbitax");
+      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna.otutax");
 //      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
     }
   }

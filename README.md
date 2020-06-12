@@ -1,5 +1,5 @@
 
-# MAPseq v2.0alpha
+# MAPseq v2.0.1alpha
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -208,8 +208,14 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+2.0.1 alpha (12 Jun 2020)
+- Fixed segmentation fault when calling mapseq for sequence mapping only without OTU/taxonomy classification
+- Added OTU tables and counts summary methods
+- Fixed alpha version using older mapref-2.2.fna by default instead of newer mapref-2.2b.fna
+
 2.0 alpha (2020)
 - Added paired end read mapping
+
 1.2.5 (12 Jul 2019)
 - Added "-otucounts" and "-otutable" options to generate count summary for single mapseq (.mseq) files or an otu/taxa table for multiple .mseq files
 

@@ -277,7 +277,7 @@ void taskSearch()
       }
       outstr+="\n";
       if (mtdata.print_hits){
-        etax& tax(mtdata.seqdb->taxa.at(0));
+//        etax& tax(mtdata.seqdb->taxa.at(0));
         for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
           ealigndata& adata(pinfo.matchcounts[l]);
           outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
