@@ -97,6 +97,9 @@ class eseqdb
 {
  public:
   int minscore;
+  int tophits;
+  int topotus;
+  int otulim;
 
   estrarrayof<eseq> seqs;
   estrhashof<int> seqind;

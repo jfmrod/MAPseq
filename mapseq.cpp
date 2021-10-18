@@ -4247,7 +4247,7 @@ int emain()
   epregister(swmin);
   epregister(swmax);
   epregister(nocluster);
-  epregister(otulim);
+  epregister2(db.otulim,"otulim");
   epregister(lambda);
   epregister2(mtdata.print_hits,"print_hits");
   epregister2(mtdata.print_align,"print_align");
@@ -4301,8 +4301,8 @@ int emain()
 
   epregister(nthreads);
 
-  epregister(tophits);
-  epregister(topotus);
+  epregister2(db.tophits,"tophits");
+  epregister2(db.topotus,"topotus");
   int step=0;
 
 //  epregister(step);
