@@ -13,10 +13,11 @@ float swmin=0.05;
 float swmax=0.3;
 int minid1=1;
 int minid2=1;
-int topotus=10;
-int tophits=20;
-int minscore=30;
-int otulim=50;
+//int topotus=10;
+//int tophits=20;
+//int minscore=30;
+//int otulim=50;
+
 float sweight=30.0;
 float sweightabs=0.1;
 float cfthres=0.5;
@@ -277,7 +278,7 @@ void taskSearch()
       }
       outstr+="\n";
       if (mtdata.print_hits){
-        etax& tax(mtdata.seqdb->taxa.at(0));
+//        etax& tax(mtdata.seqdb->taxa.at(0));
         for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
           ealigndata& adata(pinfo.matchcounts[l]);
           outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
@@ -2478,7 +2479,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //        otukmers[v&KMERMASK]=new deque<int>();
 //        otukmers[v&KMERMASK]->reserve(1000);
 //      }
-      otukmers[v&KMERMASK].add(i);
+      otukmers[v&KMERMASK].push_back(i);
     }
   }
   v=pstr[p/32u]>>(2u*(p%32u));
@@ -2491,7 +2492,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //      otukmers[v&KMERMASK]=new deque<int>();
 //      otukmers[v&KMERMASK]->reserve(1000);
 //    }
-    otukmers[v&KMERMASK].add(i);
+    otukmers[v&KMERMASK].push_back(i);
   }
 }
 
@@ -2512,7 +2513,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //        otukmers[v&KMERMASK]=new deque<int>();
 //        otukmers[v&KMERMASK]->reserve(1000);
 //      }
-      otukmers[v&KMERMASK].add(i);
+      otukmers[v&KMERMASK].push_back(i);
     }
   }
   v=pstr[p/32u]>>(2u*(p%32u));
@@ -2525,7 +2526,7 @@ void otukmeradd(ebasicarray<ekmerarray>& otukmers,int i,eseq& s,eintarray& tmpkm
 //      otukmers[v&KMERMASK]=new deque<int>();
 //      otukmers[v&KMERMASK]->reserve(1000);
 //    }
-    otukmers[v&KMERMASK].add(i);
+    otukmers[v&KMERMASK].push_back(i);
   }
 }
 
@@ -2638,7 +2639,7 @@ void esearchws::initProt(const eseqdb& seqdb)
 */
 }
 
-eseqdb::eseqdb() 
+eseqdb::eseqdb(): minscore(30),tophits(20),topotus(10),otulim(50)
 {
   for (unsigned int i=0; i<MAXSIZE; ++i)
     akmers[i]=0x00u;
@@ -3189,7 +3190,70 @@ void eseqdb::seqsearch_global(const estr& str2id,eseq& s,earray<epredinfo>& pinf
 //  ta=ta*0.99+t1.lap()*0.01;
 }
 
-void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& s2,earray<epredinfo>& pinfoarr,esearchws& sws)
+
+void eseqdb::seqalign_global(const estr& str2id,eseq& s,earray<epredinfo>& previnfoarr,earray<epredinfo>& pinfoarr,esearchws& sws)
+{
+  pinfoarr.clear();
+
+  epredinfo pinfo;
+  long s_start=0;
+  long s_end=s.seqlen;
+  long s_len=s_end-s_start;
+
+  eseq srev;
+  srev.setrevcompl(s,s_start,s_end);
+
+  if (sws.offset+(unsigned int)(s_len)<sws.offset){ // need an int here otherwise the comparison is made in long and the offset is not correctly reset
+    sws.offset=1u;
+    sws.kmerpos.init(MAXSIZE,0u);
+    sws.kmerposrev.init(MAXSIZE,0u);
+  }
+  setkmerpos(sws.kmerpos,s,sws.offset,s_start,s_end);
+  setkmerpos(sws.kmerposrev,srev,sws.offset);
+
+  for (int l=0; l<previnfoarr[0].matchcounts.size(); ++l){
+//    epinfo &pinfo(previnfoarr[l]);
+    ealigndata &prevadata(previnfoarr[0].matchcounts[l]);
+
+    int sbest=prevadata.seqid;
+    eseq &sdb(seqs.values(sbest));
+    if (sws.offset2+(unsigned int)(seqs.values(sbest).seqlen)<sws.offset2){  // need an unsigned int here otherwise the comparison is made in long and the offset is not correctly reset, signed int overflows are undefined so this cannot be done with signed ints either
+      sws.offset2=1u;
+      sws.kmerpos2.init(MAXSIZE,0);
+    }
+    setkmerpos(sws.kmerpos2,seqs.values(sbest),sws.offset2);
+
+    ealigndata adata;
+    adata.seqid=sbest;
+    adata.revcompl=prevadata.revcompl;
+//    adata.kmercount=sws.idcount[best[l]];
+  
+    if (!prevadata.revcompl){
+      seqident_global(str2id,seqs.keys(sbest),s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
+    }else{
+      seqident_global(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata,sws,as);
+      int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
+      adata.revcompl=true;
+    }
+    adata.globalalign(as);
+//    if (adata.matches+adata.mismatches>0 && adata.score()>=minscore){
+      pinfo.matchcounts.add(adata);
+//    }
+
+    sws.offset2+=seqs.values(sbest).seqlen;
+  }
+  sws.offset+=s_len;
+
+//  if (pinfo.matchcounts.size()>0){
+//    heapsort(pinfo.matchcounts);
+    pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
+    pinfo.seqid=pinfo.tophit.seqid;
+    pinfoarr.add(pinfo);
+//  }
+}
+
+
+void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& srev2,earray<epredinfo>& pinfoarr,esearchws& sws)
 {
   //t1.reset();
   pinfoarr.clear();
@@ -3197,20 +3261,20 @@ void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& s2,earray<epredinfo>& pi
 //  kmercount_both(db.otus.size(),db.otukmers,s,sws.idcount2,sws.bitmask,akmers,0x0Fu);
 //  kmercount_both2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
 //  kmercount_both_nopos2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
-  ldieif(s.seqlen>SEQSEGSIZE || s2.seqlen>SEQSEGSIZE,"paired end reads longer than "+estr(SEQSEGSIZE)+" not supported");
+  ldieif(s.seqlen>SEQSEGSIZE || srev2.seqlen>SEQSEGSIZE,"paired end reads longer than "+estr(SEQSEGSIZE)+" not supported");
 
   long segi=0;
     epredinfo pinfo;
     long s_start=0 , s_start2=0;
-    long s_end=s.seqlen,  s_end2=s2.seqlen;
-    long s_len=s.seqlen,  s_len2=s2.seqlen;
+    long s_end=s.seqlen,  s_end2=srev2.seqlen;
+    long s_len=s.seqlen,  s_len2=srev2.seqlen;
     
 //    int step=1;
     int step=(s_len+s_len2)/150+1;
 //    if (s_len<150) step=
-    eseq srev,srev2;
+    eseq srev,s2;
     srev.setrevcompl(s,s_start,s_end);
-    srev2.setrevcompl(s2,s_start,s_end);
+    s2.setrevcompl(srev2,s_start2,s_end2);
 //    cout << "# " << str2id << " start: " << s_start << " end: " << s_end << " len: " << s_len << " seqlen: " << s.seqlen << " srev: " << srev.seqlen << endl;
   
     sws.otukmerpos.init(otus.size()*2,0);
@@ -3434,6 +3498,44 @@ void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& s2,earray<epredinfo>& pi
       adata.mismatches=adata1.mismatches+adata2.mismatches;
       adata.gaps=adata1.gaps+adata2.gaps;
       adata._score=adata1._score+adata2._score;
+//      cout << "pair end: " << adata1.s2 << " " << adata1.e2 << " - " << adata2.s2 << " " << adata2.e2 << " " << (adata.revcompl?"-":"+") << " " << seqids[best[l]] << " " << seqs.size() << endl;
+      if (adata1.e2 > adata2.s2 && adata2.e2 > adata1.s2){ // some overlap, need to subtract overlap scores and stats
+//        lwarn("overlap: "+estr(adata1.s2)+" "+adata1.e2+" - "+adata2.s2+" "+adata2.e2);
+        int tmpscore,tmpmatches,tmpmismatches,tmpgaps;
+        if (!adata.revcompl && adata2.s2 < adata1.s2 || adata.revcompl && adata1.s2 < adata2.s2){ // incorrect order of paired ends, take highest scoring of both alignments
+//          lerror("2nd pair end before 1st?");
+          adata._score=0; // this is not a correct match, skip this alignment
+          if (adata1._score>adata2._score){
+            adata.s1=adata1.s1;
+            adata.s2=adata1.s2;
+            adata.e1=adata1.e1;
+            adata.e2=adata1.e2;
+            adata.matches=adata1.matches;
+            adata.mismatches=adata1.mismatches;
+            adata.gaps=adata1.gaps;
+            adata._score=adata1._score;
+          }else{
+            adata.s1=adata2.s1;
+            adata.s2=adata2.s2;
+            adata.e1=adata2.e1;
+            adata.e2=adata2.e2;
+            adata.matches=adata2.matches;
+            adata.mismatches=adata2.mismatches;
+            adata.gaps=adata2.gaps;
+            adata._score=adata2._score;
+          }
+        }else{
+          if (!adata.revcompl)
+            adata2.partscore(adata2.s2-adata1.s2+1,adata2.e1,tmpscore,tmpmatches,tmpmismatches,tmpgaps,as);
+          else
+            adata1.partscore(adata1.s2-adata2.s2+1,adata1.e1,tmpscore,tmpmatches,tmpmismatches,tmpgaps,as);
+
+          adata._score-=tmpscore;
+          adata.matches-=tmpmatches;
+          adata.mismatches-=tmpmismatches;
+          adata.gaps-=tmpgaps;
+        }
+      }
 
   //    LDEBUG(D_SEQALIGNMENT,print_tncount(&tncounts[l*NCOUNT_MAXLEN],0,s.seqlen));
       if (adata.matches+adata.mismatches>0 && adata.score()>=minscore){
@@ -3925,7 +4027,7 @@ void eseqdb::makeClusterMT(ethreads& t) //,const estr& cfile)
 //  db.otukmers.init(MAXSIZE);
   for (uint32_t i=0; i<MAXSIZE; ++i){
     if (akmers[i&0xFu]==0u) continue;
-    otukmers[i].reservep(seqs.size());
+//    otukmers[i].reserve(seqs.size());
   }
 
   eintarray &len_si(mtdata.len_si);

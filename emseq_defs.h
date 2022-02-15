@@ -4,6 +4,11 @@
 #include <eutils/ebasicarray.h>
 #include <eutils/eblockarray.h>
 
+
+#include <deque>
+
+using namespace std;
+
 #include "mapseq-config.h"
 #include "eseqali.h"
 #include "kmerseqtables-data.h"
@@ -24,7 +29,8 @@
 
 
 typedef ebasicarray<unsigned int> euintarray;
-typedef eblockarray<uint32_t> ekmerarray;
+//typedef eblockarray<uint32_t> ekmerarray;  // leads to high vmem usage
+typedef deque<uint32_t> ekmerarray;
 
 #define KMERSIZE 10ul
 #define KMERBITS (KMERSIZE*2ul)

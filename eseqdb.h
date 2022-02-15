@@ -96,6 +96,11 @@ estr outfmt_confidences(const etax& tax,const earrayof<double,int>& ptax,const e
 class eseqdb
 {
  public:
+  int minscore;
+  int tophits;
+  int topotus;
+  int otulim;
+
   estrarrayof<eseq> seqs;
   estrhashof<int> seqind;
   eintarray seqotu;
@@ -124,6 +129,8 @@ class eseqdb
   void seqsearch_global(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws);
   void seqsearchpair(const estr& id,eseq& s,eseq& s2,earray<epredinfo>& pinfoarr,esearchws& sws);
   void pseqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,esearchws& sws);
+
+  void seqalign_global(const estr& str2id,eseq& s,earray<epredinfo>& previnfoarr,earray<epredinfo>& pinfoarr,esearchws& sws);
 
   void processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t);
   void processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t);
@@ -169,7 +176,7 @@ extern int minid1;
 extern int minid2;
 extern int topotus;
 extern int tophits;
-extern int minscore;
+//extern int minscore;
 extern int otulim;
 extern float sweight;
 extern float sweightabs;

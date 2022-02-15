@@ -6,11 +6,9 @@ DIST_SUBDIRS=$(subdirs)
 AM_CXXFLAGS=-DDATAPATH='"$(datadir)/mapseq"'
 
 if !USE_SYSEUTILS
-  mapseq_LDADD=libs/eutils/libeutils.la
-  kmerseqtables_LDADD=libs/eutils/libeutils.la
-#  LIBADD=libs/eutils/libeutils.la
+  mapseq_LDADD=$(srcdir)/libs/eutils/libeutils.la
+  kmerseqtables_LDADD=$(srcdir)/libs/eutils/libeutils.la
   AM_CXXFLAGS+= -I$(srcdir)/libs
-#  AM_CXXFLAGS+= -Ilibs
 else
   kmerseqtables_LDADD=""
   mapseq_LDADD=""
@@ -55,7 +53,7 @@ mapseq_LDADD+=libmapseq.la
 #mapseq_DEPENDENCIES=libs/eutils/libeutils.la
 
 kmerseqtables_SOURCES=kmerseqtables.cpp
-#kmerseqtables_LDADD=eutils/libeutils.la
+kmerseqtables_LDADD=$(LDADD)
 #kmerseqtables_DEPENDENCIES=eutils/libeutils.la
 
 # needed to force make to make this file before making kmerfilter
