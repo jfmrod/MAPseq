@@ -237,7 +237,7 @@ void taskSearch()
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
   
 //        outstr+=pbuf->keys(i)+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+bid+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+taxcutoffmin+"\t"+pinfo.matchcounts.size()+"\t";
-      outstr+=pbuf->keys(i)+(mtdata.print_hits?"\t0":"")+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
+      outstr+=pbuf->keys(i)+(mtdata.print_hits?"\t0":"")+"\t"+mtdata.seqdb->seqs.keys(pinfo.tophit.seqid)+(mtdata.print_hits?estr("\t")+pinfo.tophit.kmercount:estr())+"\t"+pinfo.tophit.score()+"\t"+pinfo.tophit.identity()+"\t"+pinfo.tophit.matches+"\t"+pinfo.tophit.mismatches+"\t"+pinfo.tophit.gaps+"\t"+(s.seqstart+pinfo.tophit.s1)+"\t"+(s.seqstart+pinfo.tophit.e1)+"\t"+pinfo.tophit.s2+"\t"+pinfo.tophit.e2+"\t"+(pinfo.tophit.revcompl?"-":"+")+"\t";
      
       if (mtdata.seqdb->taxa.size()==0){
         double topscore=pinfo.tophit.score();
@@ -257,14 +257,29 @@ void taskSearch()
         earrayof<double,int> ptax;
         efloatarray tmpmcfarr;
         earrayof<double,int> tmptax;
-        taxScoreSum(taxscores[t],pinfo,tax,searchws.taxcounts,s.seqlen);
+        taxScoreSumE(taxscores[t],pinfo,tax,searchws.taxcounts,s.seqlen);
+//        taxScoreSum(taxscores[t],pinfo,tax,searchws.taxcounts,s.seqlen);
+        earrayof<double,int> mixedtax; // best mixed prediction over all taxonomies
+        efloatarray mixedmcfarr;
 
-        taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax,s.seqlen);
+        taxScoreE(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax,s.seqlen);
+//        taxScore(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax,s.seqlen);
+        mixedtax=ptax;
+        mixedmcfarr=mcfarr;
         for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
           ealigndata& adata(pinfo.matchcounts[l]);
-          taxScore(tmptax,tmpmcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
-          for (int tl=0; tl<tmptax.size(); ++tl){
-            if (tmptax.values(tl)>ptax.values(tl)){
+          taxScoreE(tmptax,tmpmcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+//          taxScore(tmptax,tmpmcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+          for (int tl=0; tl<tmptax.size(); ++tl){ // choose top hit in list which is not always best aligned (when including evidence or indirect taxonomy)
+            if (tmpmcfarr[tl]>mixedmcfarr[tl]){ // should check per level or just for top?
+//            if (tmptax.values(tl)>ptax.values(tl)){ // previous code selecting only on alignment score, but id cutoff is important too
+              ldieif(mixedtax.size()!=tmptax.size(),"size mismatch: "+estr(mixedtax.size())+" "+tmptax.size());
+              mixedtax.values(tl)=tmptax.values(tl); 
+              mixedtax.keys(tl)=tmptax.keys(tl); 
+              mixedmcfarr[tl]=tmpmcfarr[tl];
+            }
+            if (tmpmcfarr[tl]>mcfarr[tl]){ // should check per level or just for top?
+//            if (tmptax.values(tl)>ptax.values(tl)){ // previous code selecting only on alignment score, but id cutoff is important too
               ptax=tmptax; 
               mcfarr=tmpmcfarr;
             }
@@ -272,7 +287,8 @@ void taskSearch()
         }
 
         outstr+="\t";
-        outstr+=(*mtdata.outfmt)(tax,ptax,mcfarr);
+//        outstr+=(*mtdata.outfmt)(tax,ptax,mcfarr);
+        outstr+=(*mtdata.outfmt)(tax,mixedtax,mixedmcfarr);
         outstr+="\t";
       }
       outstr+="\n";
@@ -280,19 +296,25 @@ void taskSearch()
 //        etax& tax(mtdata.seqdb->taxa.at(0));
         for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
           ealigndata& adata(pinfo.matchcounts[l]);
-          outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
+          outstr+=pbuf->keys(i)+"\t"+(pinfo.matchcounts.size()-l-1)+"\t"+mtdata.seqdb->seqs.keys(adata.seqid)+"\t"+adata.kmercount+"\t"+adata.score()+"\t"+adata.identity()+"\t"+adata.matches+"\t"+adata.mismatches+"\t"+adata.gaps+"\t"+(s.seqstart+adata.s1)+"\t"+(s.seqstart+adata.e1)+"\t"+adata.s2+"\t"+adata.e2+"\t"+(adata.revcompl?"-":"+")+"\t";
           for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
             etax& tax(mtdata.seqdb->taxa.at(t));
         
             efloatarray mcfarr;
             earrayof<double,int> ptax;
-            taxScore(ptax,mcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+            taxScoreE(ptax,mcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+//            taxScore(ptax,mcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
             outstr+="\t";
             outstr+=(*mtdata.outfmt)(tax,ptax,mcfarr);
             outstr+="\t";
           }
           outstr+="\n";
         }
+      }
+      if (mtdata.print_kmerhits){
+        ldieif(searchws.idcount.size()!=searchws.seqids.size(),"mismatch idcount and seqids: "+estr(searchws.idcount.size())+" "+searchws.seqids.size());
+        for (int l=0; l<searchws.seqids.size(); ++l)
+          outstr+="#"+pbuf->keys(i)+"\t"+searchws.idcount[l]+"\t"+mtdata.seqdb->seqs.keys(searchws.seqids[l]%mtdata.seqdb->seqs.size())+"\n";
       }
 //      outstr+=pinfo.tophit.profile.str() + "\n";
       if (mtdata.print_align){
@@ -1165,6 +1187,106 @@ void calcConfidence(earrayof<double,int>& ptax,efloatarray &mcfarr,const ealignd
 
 
 
+void taxScoreE(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,epredinfo& pinfo,edoublearray& taxscores,etax& tax,int slen)
+{
+  ptax.clear();
+//  while (ptax.size()<tax.names.size())
+//    ptax.add(-1,0.0);
+  for (int i=0; i<tax.names.size(); ++i)
+    ptax.add(-1,0.0);
+
+
+//  float sw=sweightabs; //MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+//  float sw=MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+
+  float sw=MAX(swmin,MIN(swmax,(swmax-MAX(0.0,(log(slen)-log(80.0)))*(swmax-swmin)/(log(500.0)-log(80.0)))));
+
+  mcfarr.init(ptax.size(),0.0);
+  if(tax.seqs[adata.seqid]==0x00)
+    return;
+
+//  ldieif(tax.seqs[adata.seqid]==0x00,"Missing taxonomy for sequence");
+  float cfw;
+  eseqtax &seqtax(*tax.seqs[adata.seqid]);
+  for (int l=0; l<seqtax.tl.size(); ++l){
+    ldieif(seqtax.tl[l].tid>=long(tax.names[l].size()),estr("key out of tax: ")+adata.seqid+" "+estr(l)+" "+seqtax.tl[l].tid+" "+tax.names[l].size());
+    cfw=1.0;
+    if (seqtax.bid>0.0)
+      cfw=0.5*seqtax.tl[l].cf+0.5;
+    ptax.keys(l)=seqtax.tl[l].tid;
+//    ptax.values(l)=exp((1.0l-pinfo.tophit.score()/adata.score())*sweight)*cfw/taxscores[l];
+//    ptax.values(l)=exp((adata.score()-pinfo.tophit.score())*sweightabs)*cfw/taxscores[l];
+    if (ptax.keys(l)==-1)
+      ptax.values(l)=0.0;
+    else
+      ptax.values(l)=exp((adata.score()-pinfo.tophit.score())*sw)*cfw*seqtax.tl[l].evidence/taxscores[l];
+  }
+  calcConfidence(ptax,mcfarr,adata,pinfo,tax);
+}
+
+void taxScoreSumE(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts,int slen)
+{
+  taxscores.init(tax.names.size(),0.0);
+  int tophitl=-1;
+
+  for (int l=pinfo.matchcounts.size()-1; l>=0; --l){
+    int sbest=pinfo.matchcounts[l].seqid;
+    if (tax.seqs[sbest]!=0x00) { tophitl=l; break; }
+  }
+  if (tophitl==-1) return;
+
+  ealigndata &tophit(pinfo.matchcounts[tophitl]);
+  pinfo.tophit=tophit; 
+  ldieif(tax.seqs[tophit.seqid]==0x00,"top hit does not have taxonomy: "+estr(tophit.seqid));
+
+  double topscore=tophit.score();
+
+  int taxid=0;
+  ebasicarray<efloatarray> taxmaxscores;
+  taxmaxscores.init(tax.names.size());
+  for (int i=0; i<taxmaxscores.size(); ++i)
+    taxmaxscores[i].init(tax.names[i].size(),0.0);
+//  taxcounts.init(tax.names.size());
+//  for (int i=0; i<taxcounts.size(); ++i)
+//    taxcounts[i].init(tax.names[i].size(),-1);
+
+//  float sw=MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+//  float sw=MAX(0.05,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+  float sw=MAX(swmin,MIN(swmax,(swmax-MAX(0.0,(log(slen)-log(80.0)))*(swmax-swmin)/(log(500.0)-log(80.0)))));
+//  float sw=sweightabs; // MAX(0.025,MIN(0.3,(0.3-MAX(0.0,(log(slen)-log(80.0)))*(0.3-0.05)/(log(500.0)-log(80.0)))));
+
+  for (int l=pinfo.matchcounts.size()-1; l>=0; --l){
+    int sbest=pinfo.matchcounts[l].seqid;
+    if (tax.seqs[sbest]==0x00) continue;
+//    if (pinfo.matchcounts[l].score()<=0.0) break; // do not use alignments with less than or zero score
+    eseqtax &taxhit(*tax.seqs[sbest]);
+
+    float cfw,w;
+    for (int k=0; k<taxhit.tl.size(); ++k){
+//      if (taxcounts[k][taxhit.tl[k].tid]==taxid) continue;
+      if (taxhit.tl[k].tid==-1) continue;
+      cfw=1.0;
+      if (taxhit.bid>0.0)
+        cfw=0.5*taxhit.tl[k].cf+0.5;
+//      taxcounts[k][taxhit.tl[k].tid]=taxid;
+//      w=exp((1.0l-topscore/pinfo.matchcounts[l].score())*sweight)*cfw;
+//      w=exp((pinfo.matchcounts[l].score()-topscore)*sweightabs)*cfw;
+      w=exp((pinfo.matchcounts[l].score()-topscore)*sw)*taxhit.tl[k].evidence*cfw;
+      if (w>taxmaxscores[k][taxhit.tl[k].tid]){
+//        cout << "l: " << l << " k: " << k << " w: " << w << " score: " << pinfo.matchcounts[l].score() << " topscore: " << topscore << endl;
+        taxscores[k]+=w-taxmaxscores[k][taxhit.tl[k].tid];
+        taxmaxscores[k][taxhit.tl[k].tid]=w;
+      }
+//      taxscores[k]+=exp(log(pinfo.matchcounts[l].identity()*100.0)*30.0);
+    }
+  }
+//  for (int i=0; i<taxscores.size(); ++i)
+//    cout << " i: " << i << " maxscore: " << taxscores[i] << endl;
+}
+
+
+
+
 void taxScore(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,epredinfo& pinfo,edoublearray& taxscores,etax& tax,int slen)
 {
   ptax.clear();
@@ -1336,7 +1458,7 @@ void pseqncount(const eseq& s1,long p1,long e1,const eseq& s2,long p2,long e2,ea
 
 
 
-void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarray& kmerpos1,esearchws& sws,ebasicarray<ediag> &diags)
+void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarray& kmerpos1,int offset1,esearchws& sws,ebasicarray<ediag> &diags)
 {
   long p1,p2;
   unsigned long *pstr1=reinterpret_cast<unsigned long*>(s1.seq._str);
@@ -1363,7 +1485,10 @@ void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarr
             lastkmerlen+=d;
           }else{
             if (lastkmerlen){
-//              cout << "p1: " << lastkmerpos-lastkmerlen+KMERSIZE<< "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+              if (lastkmerpos-lastkmerlen+KMERSIZE>s1.seqlen){
+                cerr << "p1: " << lastkmerpos-lastkmerlen+KMERSIZE<< "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+                exit(-1);
+              }
               diags.add(ediag(lastkmerpos-lastkmerlen+KMERSIZE,lastndelta,lastkmerlen));
             }
             lastkmerlen=KMERSIZE;
@@ -1384,6 +1509,10 @@ void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarr
           lastkmerlen+=d;
         }else{
           if (lastkmerlen){
+              if (lastkmerpos-lastkmerlen+KMERSIZE>s1.seqlen){
+                cerr << "p1: " << lastkmerpos-lastkmerlen+KMERSIZE<< "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+                exit(-1);
+              }
             diags.add(ediag(lastkmerpos-lastkmerlen+KMERSIZE,lastndelta,lastkmerlen));
           }
           lastkmerlen=KMERSIZE;
@@ -1393,6 +1522,11 @@ void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarr
       }
     }
     if (lastkmerlen){
+              if (lastkmerpos-lastkmerlen+KMERSIZE>s1.seqlen){
+                cerr << "p1: " << lastkmerpos-lastkmerlen+KMERSIZE<< "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+                exit(-1);
+              }
+
       diags.add(ediag(lastkmerpos-lastkmerlen+KMERSIZE,lastndelta,lastkmerlen));
 //      cout << "end p1: " << lastkmerpos-lastkmerlen+KMERSIZE << "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
     }
@@ -1405,14 +1539,22 @@ void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarr
       v2|=(pstr2[p2/32u+1u]<<(64u-2u*(p2%32u)))&safe_shift[p2%32u];
       for (k=0; k<32u-KMERSIZE; ++k,v2>>=2u){
         long kpos1=kmerpos1[v2&KMERMASK];
-        if (kpos1>sws.offset){
-          kpos1+=s1_start-sws.offset;
+        if (kpos1>offset1){
+          kpos1+=s1_start-offset1;
+          if (kpos1>s1.seqlen){
+            cerr << endl << "#kmerpos1 out of bounds: " << endl;
+            exit(0);
+          }
           long d=p2+k-lastkmerpos;
-          if (d<=KMERSIZE && ((lastndelta==kpos1-p2-k) || (p2+k-lastndelta+KMERSIZE<=s1_end && (v2&KMERMASK)==seqkmer(s1,p2+k-lastndelta)))){
+          if (d<=KMERSIZE && ((lastndelta==p2+k-kpos1) || (p2+k-lastndelta+KMERSIZE<=s1_end && (v2&KMERMASK)==seqkmer(s1,p2+k-lastndelta)))){
             lastkmerlen+=d;
           }else{
             if (lastkmerlen){
 //              cout << "p2: " << lastkmerpos-lastkmerlen+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+              if (lastkmerpos-lastkmerlen+KMERSIZE-lastndelta>s1.seqlen){
+                cerr << "p2: " << lastkmerpos-lastkmerlen+KMERSIZE<< "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+                exit(-1);
+              }
               diags.add(ediag(lastkmerpos-lastkmerlen+KMERSIZE-lastndelta,lastndelta,lastkmerlen));
             }
             lastkmerlen=KMERSIZE;
@@ -1426,13 +1568,21 @@ void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarr
     v2|=(pstr2[p2/32u+1u]<<(64u-2u*(p2%32u)))&safe_shift[p2%32u];
     for (k=0; p2+k+KMERSIZE<s2.seqlen; ++k,v2>>=2u){
       long kpos1=kmerpos1[v2&KMERMASK];
-      if (kpos1>sws.offset){
-        kpos1+=s1_start-sws.offset;
+      if (kpos1>offset1){
+        kpos1+=s1_start-offset1;
+          if (kpos1>s1.seqlen){
+            cerr << endl << "#kmerpos1 out of bounds: " << endl;
+            exit(0);
+          }
         long d=p2+k-lastkmerpos;
-        if (d<=KMERSIZE && ((lastndelta==kpos1-p2-k) || (p2+k-lastndelta+KMERSIZE<=s1_end && (v2&KMERMASK)==seqkmer(s1,p2+k-lastndelta)))){
+        if (d<=KMERSIZE && ((lastndelta==p2+k-kpos1) || (p2+k-lastndelta+KMERSIZE<=s1_end && (v2&KMERMASK)==seqkmer(s1,p2+k-lastndelta)))){
           lastkmerlen+=d;
         }else{
           if (lastkmerlen){
+              if (lastkmerpos-lastkmerlen+KMERSIZE-lastndelta>s1.seqlen){
+                cerr << "p2: " << lastkmerpos-lastkmerlen+KMERSIZE<< "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+                exit(-1);
+              }
             diags.add(ediag(lastkmerpos-lastkmerlen+KMERSIZE-lastndelta,lastndelta,lastkmerlen));
           }
           lastkmerlen=KMERSIZE;
@@ -1442,6 +1592,10 @@ void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarr
       }
     }
     if (lastkmerlen){
+              if (lastkmerpos-lastkmerlen+KMERSIZE-lastndelta>s1.seqlen){
+                cerr << "p2: " << lastkmerpos-lastkmerlen+KMERSIZE<< "," << lastkmerpos+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
+                exit(-1);
+              }
 //      cout << "end p2: " << lastkmerpos-lastkmerlen+KMERSIZE << " len: " << lastkmerlen << " ndelta: " << lastndelta << endl;
       diags.add(ediag(lastkmerpos-lastkmerlen+KMERSIZE-lastndelta,lastndelta,lastkmerlen));
     }
@@ -1450,6 +1604,8 @@ void find_diags(const eseq& s1,const eseq& s2,long s1_start,long s1_end,euintarr
 
 ediag *sparse_dynamic_prog(ebasicarray<ediag> &diags,const ealignscore& as)
 {
+  if (diags.size()==0) return(0x00);
+
   // sparse dynamic programming to find longest chain of segments
   multimap<long,ediag*> segments;
 
@@ -1521,7 +1677,7 @@ ediag *sparse_dynamic_prog(ebasicarray<ediag> &diags,const ealignscore& as)
 
 #define align(a,b) (a-(a)%b)
 
-void pseqident_local(const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const epalignscore& pas,long s1_start=0,long s1_end=0)
+void pseqident_local(const eseq& s1,euintarray& kmerpos1,unsigned int offset1,const eseq& s2,ealigndata& adata,esearchws& sws,const epalignscore& pas,long s1_start=0,long s1_end=0)
 {
   long p1,p2;
   unsigned long *pstr1=reinterpret_cast<unsigned long*>(s1.seq._str);
@@ -1727,7 +1883,7 @@ void pseqident_local(const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealignda
 }
 
 
-void seqident_local_leftext(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+void seqident_local_leftext(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,unsigned int offset1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
 {
   if (s1_end==0) s1_end=s1.seqlen;
   long s1_len=s1_end-s1_start;
@@ -1741,7 +1897,7 @@ void seqident_local_leftext(const estr& s1id,const estr& s2id,const eseq& s1,eui
   ebasicarray<ediag> diags;
 
   LDEBUG(D_PROFILE,t2.reset());
-  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,offset1,sws,diags);
   LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
 
   if (diags.size()==0){
@@ -1753,7 +1909,8 @@ void seqident_local_leftext(const estr& s1id,const estr& s2id,const eseq& s1,eui
 
 
   float tmpflanks=0.0;
-  ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2)+" s1 id: "+s1id+" s2 id: "+s2id);
+  ldieif(s1.seqlen<bestseg->j,"segment start larger than sequence s1 length: "+estr(s1.seqlen)+" < "+estr(bestseg->j)+" s1 id: "+s1id+" s2 id: "+s2id+" i: "+bestseg->i);
+  ldieif(s2.seqlen<bestseg->j2,"segment start larger than sequence s2 length: "+estr(s2.seqlen)+" < "+estr(bestseg->j2)+" s1 id: "+s1id+" s2 id: "+s2id);
   long minright=MIN(s1.seqlen-bestseg->j,s2.seqlen-bestseg->j2);
 //  seqcalign_global_norightedgegap(s1,bestseg->j,s1.seqlen,s2,bestseg->j2,s2.seqlen,adata,alignws);
   seqcalign_global_norightedgegap(s1,bestseg->j,MIN(s1.seqlen,bestseg->j+2*minright),s2,bestseg->j2,MIN(s2.seqlen,bestseg->j2+2*minright),adata,sws.alignws,as);
@@ -1809,7 +1966,7 @@ void seqident_local_leftext(const estr& s1id,const estr& s2id,const eseq& s1,eui
   return;
 }
 
-void seqident_local_rightext(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+void seqident_local_rightext(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,unsigned int offset1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
 {
   if (s1_end==0) s1_end=s1.seqlen;
   long s1_len=s1_end-s1_start;
@@ -1823,7 +1980,7 @@ void seqident_local_rightext(const estr& s1id,const estr& s2id,const eseq& s1,eu
   ebasicarray<ediag> diags;
 
   LDEBUG(D_PROFILE,t2.reset());
-  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,offset1,sws,diags);
   LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
 
   if (diags.size()==0){
@@ -1892,7 +2049,7 @@ void seqident_local_rightext(const estr& s1id,const estr& s2id,const eseq& s1,eu
 }
 
 
-void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,unsigned int offset1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
 {
   if (s1_end==0) s1_end=s1.seqlen;
   long s1_len=s1_end-s1_start;
@@ -1908,7 +2065,7 @@ void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray&
   ebasicarray<ediag> diags;
 
   LDEBUG(D_PROFILE,t2.reset());
-  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,offset1,sws,diags);
   LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
 
   if (diags.size()==0){
@@ -1996,7 +2153,7 @@ void seqident_local(const estr& s1id,const estr& s2id,const eseq& s1,euintarray&
 }
 
 
-void seqident_global(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
+void seqident_global(const estr& s1id,const estr& s2id,const eseq& s1,euintarray& kmerpos1,unsigned int offset1,const eseq& s2,ealigndata& adata,esearchws& sws,const ealignscore& as,long s1_start=0,long s1_end=0)
 {
   if (s1_end==0) s1_end=s1.seqlen;
   long s1_len=s1_end-s1_start;
@@ -2012,7 +2169,7 @@ void seqident_global(const estr& s1id,const estr& s2id,const eseq& s1,euintarray
   ebasicarray<ediag> diags;
 
   LDEBUG(D_PROFILE,t2.reset());
-  find_diags(s1,s2,s1_start,s1_end,kmerpos1,sws,diags);
+  find_diags(s1,s2,s1_start,s1_end,kmerpos1,offset1,sws,diags);
   LDEBUG(D_PROFILE,tdp1=tdp1*0.99+t2.lap()*0.01);
 
   if (diags.size()==0){
@@ -2727,7 +2884,8 @@ void eseqdb::seqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,es
     }
 //    ts=ts*0.99+t1.lap()*0.01;
 
-    eintarray seqids;
+    eintarray &seqids(sws.seqids);
+    seqids.clear();
     for (int l=0; l<best.size() && l<topotus; ++l){
       int ibest=best[l];
       if (ibest<otus.size()){
@@ -2837,6 +2995,7 @@ void eseqdb::seqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,es
     for (int i=0; i<otureps.size(); ++i){
       best.add(seqids.size());
       seqids.add(otureps[i]);
+      sws.idcount.add(-1); // make sure that idcount and seqids match
     }
 //    best+=otureps;
    
@@ -2875,7 +3034,7 @@ void eseqdb::seqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,es
     
       if (seqids[best[l]]<seqs.size()){
 //        cout << "# forward align" << endl;
-        seqident_local(str2id,seqs.keys(sbest),s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
+        seqident_local(str2id,seqs.keys(sbest),s,sws.kmerpos,sws.offset,sdb,adata,sws,as,s_start,s_end);
   //      seqident_global(s,sws.kmerpos,sdb,adata,sws,as);
   //      seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
   /*
@@ -2889,7 +3048,7 @@ void eseqdb::seqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,es
   */
       }else{
 //        cout << "# reverse align" << endl;
-        seqident_local(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata,sws,as);
+        seqident_local(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sws.offset,sdb,adata,sws,as);
         // flip 
         int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
         adata.revcompl=true;
@@ -3135,7 +3294,7 @@ void eseqdb::seqsearch_global(const estr& str2id,eseq& s,earray<epredinfo>& pinf
     
       if (seqids[best[l]]<seqs.size()){
 //        cout << "# forward align" << endl;
-        seqident_global(str2id,seqs.keys(sbest),s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
+        seqident_global(str2id,seqs.keys(sbest),s,sws.kmerpos,sws.offset,sdb,adata,sws,as,s_start,s_end);
   //      seqident_global(s,sws.kmerpos,sdb,adata,sws,as);
   //      seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
   /*
@@ -3149,7 +3308,7 @@ void eseqdb::seqsearch_global(const estr& str2id,eseq& s,earray<epredinfo>& pinf
   */
       }else{
 //        cout << "# reverse align" << endl;
-        seqident_global(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata,sws,as);
+        seqident_global(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sws.offset,sdb,adata,sws,as);
         // flip 
         int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
         adata.revcompl=true;
@@ -3228,9 +3387,9 @@ void eseqdb::seqalign_global(const estr& str2id,eseq& s,earray<epredinfo>& previ
 //    adata.kmercount=sws.idcount[best[l]];
   
     if (!prevadata.revcompl){
-      seqident_global(str2id,seqs.keys(sbest),s,sws.kmerpos,sdb,adata,sws,as,s_start,s_end);
+      seqident_global(str2id,seqs.keys(sbest),s,sws.kmerpos,sws.offset,sdb,adata,sws,as,s_start,s_end);
     }else{
-      seqident_global(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata,sws,as);
+      seqident_global(str2id,seqs.keys(sbest),srev,sws.kmerposrev,sws.offset,sdb,adata,sws,as);
       int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
       adata.revcompl=true;
     }
@@ -3260,7 +3419,7 @@ void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& srev2,earray<epredinfo>&
 //  kmercount_both(db.otus.size(),db.otukmers,s,sws.idcount2,sws.bitmask,akmers,0x0Fu);
 //  kmercount_both2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
 //  kmercount_both_nopos2(db.otus.size(),db.otukmers,s,sws.idcount,sws.otukmerpos,akmers,0x0Fu);
-  ldieif(s.seqlen>SEQSEGSIZE || srev2.seqlen>SEQSEGSIZE,"paired end reads longer than "+estr(SEQSEGSIZE)+" not supported");
+  ldieif(s.seqlen>SEQSEGSIZE || srev2.seqlen>SEQSEGSIZE,"paired end reads longer than "+estr(SEQSEGSIZE)+" not supported: "+id);
 
   long segi=0;
     epredinfo pinfo;
@@ -3472,14 +3631,14 @@ void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& srev2,earray<epredinfo>&
       adata.kmercount=sws.idcount[best[l]];
     
       if (seqids[best[l]]<seqs.size()){
-        seqident_local_leftext(id,seqs.keys(sbest),s,sws.kmerpos,sdb,adata1,sws,as,s_start,s_end);
-        seqident_local_rightext(id,seqs.keys(sbest),s2,sws.kmerpos3,sdb,adata2,sws,as,s_start2,s_end2);
+        seqident_local_leftext(id,seqs.keys(sbest),s,sws.kmerpos,sws.offset,sdb,adata1,sws,as,s_start,s_end);
+        seqident_local_rightext(id,seqs.keys(sbest),s2,sws.kmerpos3,sws.offset3,sdb,adata2,sws,as,s_start2,s_end2);
 
 //        seqident_local(id,db.seqs.keys(sbest),s,sws.kmerpos,sdb,adata1,sws,as,s_start,s_end);
 //        seqident_local(id,db.seqs.keys(sbest),s2,sws.kmerpos3,sdb,adata2,sws,as,s_start2,s_end2);
       }else{
-        seqident_local_rightext(id,seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata1,sws,as);
-        seqident_local_leftext(id,seqs.keys(sbest),srev2,sws.kmerposrev3,sdb,adata2,sws,as);
+        seqident_local_rightext(id,seqs.keys(sbest),srev,sws.kmerposrev,sws.offset,sdb,adata1,sws,as);
+        seqident_local_leftext(id,seqs.keys(sbest),srev2,sws.kmerposrev3,sws.offset3,sdb,adata2,sws,as);
 //        seqident_local(id,db.seqs.keys(sbest),srev,sws.kmerposrev,sdb,adata1,sws,as);
 //        seqident_local(id,db.seqs.keys(sbest),srev2,sws.kmerposrev3,sdb,adata2,sws,as);
 
@@ -3718,7 +3877,7 @@ void eseqdb::pseqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,e
 //      cout << "s_start: " << s_start << " " << s_start+seqids[l]/db.seqs.size()/2 << endl;
       if ((seqids[l]/seqs.size())%2==0){
         cout << "# forward align: " << seqs.keys(sbest) << " slen: " << sdb.seqlen << endl;
-        pseqident_local(s,sws.kmerpos,sdb,adata,sws,pas,s_start+seqids[l]/seqs.size()/2,s_end);
+        pseqident_local(s,sws.kmerpos,sws.offset,sdb,adata,sws,pas,s_start+seqids[l]/seqs.size()/2,s_end);
   //      seqident_global(s,sws.kmerpos,sdb,adata,sws,as);
   //      seqcalign_global_noedgegap(s,0,s.seqlen,sdb,0,sdb.seqlen,adata,sws.alignws,as);
   /*
@@ -3734,7 +3893,7 @@ void eseqdb::pseqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,e
         cout << "# reverse align: " << seqs.keys(sbest) << " slen: " << sdb.seqlen << endl;
 //        pseqident_local(srev,sws.kmerposrev,sdb,adata,sws,as,s_start+seqids[l]/db.seqs.size()/2,s_end);
         int fs=(s_end - seqids[l]/seqs.size()/2)%3;
-        pseqident_local(srev,sws.kmerposrev,sdb,adata,sws,pas,fs,srev.seqlen);
+        pseqident_local(srev,sws.kmerposrev,sws.offset,sdb,adata,sws,pas,fs,srev.seqlen);
         // flip 
         int tmp=srev.seqlen-adata.s1+s_start; adata.s1=srev.seqlen-adata.e1+s_start; adata.e1=tmp; 
         adata.revcompl=true;
@@ -3832,6 +3991,7 @@ void eseqdb::loadTaxonomy(const estr& fname)
   etax& tax(taxa.add(etax()));
   tax.seqs.init(seqs.size(),0x00);
   int taxind=0;
+  int taxlevels=-1;
   while (!f.eof()){
     f.readln(line);
     if (line.len()==0) continue;
@@ -3843,6 +4003,7 @@ void eseqdb::loadTaxonomy(const estr& fname)
       parts=line.explode(" ");
       if (parts[0]=="#cutoff:"){
         ldieif(tax.cutoff.size()>0,"duplicate #cutoff lines!!");
+        taxlevels=parts.size()-1;
         for (int i=1; i<parts.size(); ++i){
           parts2=parts[i].explode(":");
           ldieif(parts2.size()<2,"not enough parts on #cutoff line, i.e.: 0.97:0.02");
@@ -3857,6 +4018,7 @@ void eseqdb::loadTaxonomy(const estr& fname)
       }else if (parts[0]=="#name:" && parts.size()>1){
         tax.name=parts[1];
       }else if (parts[0]=="#levels:" && parts.size()>1){
+        ldieif(taxlevels>0 && taxlevels!=parts.size()-1,"Taxlevels mismatch: "+estr(taxlevels)+" != "+estr(parts.size()-1)+" in #levels cutoffs");
         for (int i=1; i<parts.size(); ++i)
           tax.levels.add(parts[i]);
       }
@@ -3865,8 +4027,10 @@ void eseqdb::loadTaxonomy(const estr& fname)
     parts=line.explode("\t");
     ldieif(parts.size()<2,"loading taxonomy, not enough fields in line: "+line);
     if (seqind.exists(parts[0])){
-      if (parts.size()==2){ // simple taxonomy file
+      if (parts.size()==2 || parts.size()==3){ // simple taxonomy file
         parts2=parts[1].explode(";");
+        ldieif(taxlevels>0 && taxlevels!=parts2.size(),"Taxlevels mismatch: "+estr(taxlevels)+" != "+estr(parts2.size())+" in taxonomy for sequence: "+parts[0]+" :: "+parts[1]);
+        ldieif(parts2.size()==0,"empty tax: "+line);
         eseqtax *newtax=new eseqtax();
         newtax->tl.reserve(parts2.size());
         for (int i=0; i<parts2.size(); ++i){
@@ -3881,7 +4045,10 @@ void eseqdb::loadTaxonomy(const estr& fname)
               tax.ind[i].add(parts2[i],tax.names[i].size());
               tax.names[i].add(parts2[i]);
             }
-            newtax->tl.add(eseqtaxlevel(tax.ind[i][parts2[i]]));
+            if (parts.size()==3) // with evidence weights: SEQID \t SEQTAX \t EVIDENCEWEIGHT
+              newtax->tl.add(eseqtaxlevel(tax.ind[i][parts2[i]],1.0,parts[2].f()));
+            else
+              newtax->tl.add(eseqtaxlevel(tax.ind[i][parts2[i]],1.0));
           }
         }
         tax.seqs[seqind[parts[0]]]=newtax;
@@ -3913,7 +4080,8 @@ void eseqdb::loadTaxonomy(const estr& fname)
         }
 //        cout << endl;
         tax.seqs[seqind[parts[0]]]=newtax;
-      }
+      }else
+        ldie("unrecognized tax format: "+line);
     }else{
       ++notfound;
     }
