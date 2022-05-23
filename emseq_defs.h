@@ -76,7 +76,8 @@ const uint32_t BMASK16=(1u<<16u)-1u;
 const uint32_t BMASK11=(1u<<11u)-1u;
 const uint32_t BMASK10=(1u<<10u)-1u;
 
-const int SEQSEGSIZE=1500;
+const int SEQSEGSIZE=2200;
+//const int SEQSEGSIZE=1500;
 
 
 #endif

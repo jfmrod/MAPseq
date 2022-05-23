@@ -1,5 +1,8 @@
 #include "eseqali.h"
 
+#define MAX(a,b) ((a)>(b)?(a):(b))
+#define MIN(a,b) ((a)<(b)?(a):(b))
+
 char aa[]={'A','N','C','P','D','Q','E','R','F','S','G','T','H','V','I','W','K','Y','L','M','*'};
 unsigned long seqpkmer(const eseq& s,long p1);
 void invertstr(estr& str)

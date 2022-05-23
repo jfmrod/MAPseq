@@ -68,6 +68,8 @@ class esearchws
 //  uint64_t *kmerbitmask;
 //  uint64_t *bitmask;
   eintarray idcount;
+  eintarray seqids;
+
   ebasicarray<uint32_t> idcount2;
   unsigned int maskid;
   euintarray kmermask;
@@ -162,9 +164,10 @@ struct emtdata {
   bool finished;
   bool print_align;
   bool print_hits;
+  bool print_kmerhits;
   bool galign;
 
-  emtdata(): outfmt(0x00),seqdb(0x00),galign(false) {}
+  emtdata(): outfmt(0x00),seqdb(0x00),galign(false),print_kmerhits(false) {}
 };
 
 extern emtdata mtdata;
@@ -186,6 +189,8 @@ extern float cfthres;
 extern int minlen;
 extern float minqual;
 
+void taxScoreE(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,epredinfo& pinfo,edoublearray& taxscores,etax& tax,int slen);
+void taxScoreSumE(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts,int slen);
 void taxScore(earrayof<double,int>& ptax,efloatarray& mcfarr,ealigndata& adata,epredinfo& pinfo,edoublearray& taxscores,etax& tax,int slen);
 void taxScoreSum(edoublearray& taxscores,epredinfo& pinfo,etax& tax,ebasicarray<eintarray>& taxcounts,int slen);
 

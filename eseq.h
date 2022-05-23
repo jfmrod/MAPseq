@@ -10,9 +10,11 @@ class eseqtaxlevel
  public:
   int tid;
   float cf;
-  eseqtaxlevel(): tid(-1),cf(0.0) {}
-  eseqtaxlevel(int _tid): tid(_tid),cf(0.0) {}
-  eseqtaxlevel(int _tid,float _cf): tid(_tid),cf(_cf) {}
+  float evidence;
+  eseqtaxlevel(): tid(-1),cf(0.0),evidence(1.0) {}
+  eseqtaxlevel(int _tid): tid(_tid),cf(0.0),evidence(1.0) {}
+  eseqtaxlevel(int _tid,float _cf): tid(_tid),cf(_cf),evidence(1.0) {}
+  eseqtaxlevel(int _tid,float _cf,float _evidence): tid(_tid),cf(_cf),evidence(_evidence) {}
 };
 
 class eseqtax
