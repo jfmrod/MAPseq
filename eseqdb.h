@@ -132,9 +132,9 @@ class eseqdb
 
   void seqalign_global(const estr& str2id,eseq& s,earray<epredinfo>& previnfoarr,earray<epredinfo>& pinfoarr,esearchws& sws);
 
-  void processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t);
-  void processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t);
-  void processQueryPairend(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t);
+  int processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t);
+  int processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t);
+  int processQueryPairend(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t);
 
   void printSearchHeader();
 };

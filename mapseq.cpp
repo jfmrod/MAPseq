@@ -3804,7 +3804,8 @@ void actionCluster()
 //  loadSequences(db);
 //  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
 //  ldieif(db.seqs.size()==0,"empty database");
-  db.processQueryFASTA(getParser().args[1],taskCluster,t);
+  if (db.processQueryFASTA(getParser().args[1],taskCluster,t)!=0)
+    ldie("failed processing data");
   exit(0);
 }
 
@@ -3848,7 +3849,8 @@ void actionClusterCompress()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryFASTA(getParser().args[1],taskClusterCompress,t);
+  if (db.processQueryFASTA(getParser().args[1],taskClusterCompress,t)!=0)
+    ldie("process query");
   exit(0);
 }
 
@@ -3871,7 +3873,8 @@ void actionPairend()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryPairend(getParser().args[1],getParser().args[2],taskSearchPaired,t);
+  if (db.processQueryPairend(getParser().args[1],getParser().args[2],taskSearchPaired,t)!=0)
+    ldie("process query");
 
   exit(0);
 }
@@ -4096,7 +4099,8 @@ void actionProtSearch()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryFASTA(getParser().args[1],taskProtSearch,t);
+  if (db.processQueryFASTA(getParser().args[1],taskProtSearch,t)!=0)
+    ldie("process query");
 
   exit(0);
 }
@@ -4181,7 +4185,8 @@ void actionCompress()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryFASTA(getParser().args[1],taskCompress,t);
+  if (db.processQueryFASTA(getParser().args[1],taskCompress,t)!=0)
+    ldie("process query");
   exit(0);
 }
 
@@ -4349,10 +4354,13 @@ int emain()
   ethreads t;
   t.setThreads(nthreads);
 
+  int procret=0;
   if (!fastq)
-    db.processQueryFASTA(getParser().args[1],taskSearch,t);
+    procret=db.processQueryFASTA(getParser().args[1],taskSearch,t);
   else
-    db.processQueryFASTQ(getParser().args[1],taskSearch,t);
+    procret=db.processQueryFASTQ(getParser().args[1],taskSearch,t);
+
+  ldieif(procret!=0,"process query");
 
   exit(0);
 

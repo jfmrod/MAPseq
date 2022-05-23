@@ -737,7 +737,7 @@ void fastq_filter(const estr& id,const estr& qual,estr& seq){
 }
 
 
-void eseqdb::processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t){
+int eseqdb::processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t){
   estr qualchrs="!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
   for (int i=0; i<256; ++i){
     lt[i]=1;
@@ -865,10 +865,11 @@ void eseqdb::processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t)
   
   fprintf(stderr,"\r# processing FASTQ input... %li\n",seqcount);
   f.close();
+  return(0);
 }
 
 
-void eseqdb::processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t)
+int eseqdb::processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t)
 {
   etimer t1;
   t1.reset();
@@ -900,6 +901,7 @@ void eseqdb::processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t)
     mtdata.sbuffer.add(sarr);
   }
 
+  int reterr=0;
 
 //  cerr << "# processing input... ";
   long seqcount=0l;
@@ -924,7 +926,11 @@ void eseqdb::processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t)
 
     seqstart=0l;
     str2id=line;
-    ldieif(str2id.len()==0 || str2id[0]!='>',"Unexpected line: "+str2id);
+    if(str2id.len()==0 || str2id[0]!='>') {
+      lerror("Unexpected line: "+str2id);
+      reterr=-1;
+      break;
+    }
     str2id.del(0,1);
     int i=str2id.findchr(" \t");
     if (i!=-1l) str2id.del(i); // only keep id up to first white space
@@ -990,10 +996,11 @@ void eseqdb::processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t)
   f.close();
   t.wait();
   cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
+  return(reterr);
 }
 
 
-void eseqdb::processQueryPairend(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t)
+int eseqdb::processQueryPairend(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t)
 {
   etimer t1;
   t1.reset();
@@ -1005,6 +1012,8 @@ void eseqdb::processQueryPairend(const estr& fname,const estr& fname2,void (*tas
   t1.reset();
   emutex m;
   
+  int reterr=0;
+
   ldieif(fname=="-","reading from stdin not supported with paired end data");
  
   f.open(fname,"r");
@@ -1053,8 +1062,16 @@ void eseqdb::processQueryPairend(const estr& fname,const estr& fname2,void (*tas
     seqstart2=0;
     id=line; id2=line2;
 
-    ldieif(id.len()==0 || id[0]!='>',"Unexpected line: "+id);
-    ldieif(id2.len()==0 || id2[0]!='>',"Unexpected line: "+id2);
+    if (id.len()==0 || id[0]!='>'){
+      lerror("Unexpected line: "+id);
+      reterr=-1;
+      break;
+    }
+    if (id2.len()==0 || id2[0]!='>'){
+      lerror("Unexpected line: "+id2);
+      reterr=-1;
+      break;
+    }
 
     id.del(0,1);
     id2.del(0,1);
@@ -1118,6 +1135,7 @@ void eseqdb::processQueryPairend(const estr& fname,const estr& fname2,void (*tas
   f.close();
   t.wait();
   cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
+  return(reterr);
 }
 
 
