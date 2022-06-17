@@ -65,6 +65,9 @@ void eseq::setprot(estr& ucseq)
 //  estr useq;
 //  useq.reserve(int((ucseq.len()+3)/4)*4);
 //  seq.reserve(int((ucseq.len()+3)/4));
+
+  ldie("need to verify protein loading function");
+
   seq.clear();
   seqlen=ucseq.len()*3;
   if (ucseq.len()==0) return;
@@ -82,9 +85,10 @@ void eseq::setprot(estr& ucseq)
   }
 */
  
-  tmp=(prot_comp_table[ucseq._str[0]]<<6u);
-  tmp>>=3*2u;
-  for (; i<ucseq.len(); ++i){
+//  tmp=(prot_comp_table[ucseq._str[0]]<<6u);
+//  tmp>>=3*2u;
+  tmp=0x00u;
+  for (i=0; i<ucseq.len(); ++i){
     tmp|=(prot_comp_table[ucseq._str[i]]<<6u);
     seq._str[i*6/8]=(tmp>>((6-(i*6)%8)))&0xff;
     tmp>>=3*2u;
