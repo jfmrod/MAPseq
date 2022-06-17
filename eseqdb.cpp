@@ -2639,7 +2639,9 @@ void esearchws::initProt(const eseqdb& seqdb)
 */
 }
 
-eseqdb::eseqdb(): minscore(30),tophits(20),topotus(10),otulim(50)
+//eseqdb::eseqdb(): minscore(30),tophits(20),topotus(10),otulim(50)
+// changed minscore to 60 to reduce false classifications in WGS sequence data
+eseqdb::eseqdb(): minscore(60),tophits(20),topotus(10),otulim(50)
 {
   for (unsigned int i=0; i<MAXSIZE; ++i)
     akmers[i]=0x00u;
