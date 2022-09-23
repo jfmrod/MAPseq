@@ -4417,6 +4417,9 @@ int emain()
   getParser().onHelp=help;
   initdlt();
   bool fastq=false;
+  bool sens=false;
+
+  epregister(sens);
 
   epregister(minqual);
   epregister(minlen);
@@ -4483,6 +4486,7 @@ int emain()
 
   epregister(nthreads);
 
+  epregister2(db.maxhits,"maxhits");
   epregister2(db.tophits,"tophits");
   epregister2(db.topotus,"topotus");
   int step=0;
@@ -4494,6 +4498,11 @@ int emain()
 
 //  epregister(kmer);
   eparseArgs();
+  if (sens){
+    db.otulim=10000;
+    db.tophits=10000;
+    db.topotus=60;
+  }
   cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
 
   if(getParser().args.size()<2){

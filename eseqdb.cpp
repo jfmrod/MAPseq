@@ -2814,7 +2814,7 @@ void esearchws::initProt(const eseqdb& seqdb)
 */
 }
 
-eseqdb::eseqdb(): minscore(30),tophits(20),topotus(10),otulim(50)
+eseqdb::eseqdb(): minscore(60),tophits(20),maxhits(20),topotus(10),otulim(50)
 {
   for (unsigned int i=0; i<MAXSIZE; ++i)
     akmers[i]=0x00u;
@@ -3100,6 +3100,13 @@ void eseqdb::seqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,es
     //    cout << "#best: " << i << " " << seqs.keys(pinfo.matchcounts[i].seqid) << " " << pinfo.matchcounts[i].score() << endl;
       pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
       pinfo.seqid=pinfo.tophit.seqid;
+      if (pinfo.matchcounts.size()>maxhits){
+        for (int ti=0; ti<maxhits; ++ti){
+          pinfo.matchcounts[ti]=pinfo.matchcounts[ti+pinfo.matchcounts.size()-maxhits];
+        }
+        while (pinfo.matchcounts.size()>maxhits)
+          pinfo.matchcounts.erase(pinfo.matchcounts.size()-1);
+      }
       pinfoarr.add(pinfo);
     }
   }
@@ -3361,6 +3368,13 @@ void eseqdb::seqsearch_global(const estr& str2id,eseq& s,earray<epredinfo>& pinf
     //    cout << "#best: " << i << " " << seqs.keys(pinfo.matchcounts[i].seqid) << " " << pinfo.matchcounts[i].score() << endl;
       pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
       pinfo.seqid=pinfo.tophit.seqid;
+      if (pinfo.matchcounts.size()>maxhits){
+        for (int ti=0; ti<maxhits; ++ti){
+          pinfo.matchcounts[ti]=pinfo.matchcounts[ti+pinfo.matchcounts.size()-maxhits];
+        }
+        while (pinfo.matchcounts.size()>maxhits)
+          pinfo.matchcounts.erase(pinfo.matchcounts.size()-1);
+      }
       pinfoarr.add(pinfo);
     }
   }
@@ -3425,6 +3439,15 @@ void eseqdb::seqalign_global(const estr& str2id,eseq& s,earray<epredinfo>& previ
 //    heapsort(pinfo.matchcounts);
     pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
     pinfo.seqid=pinfo.tophit.seqid;
+
+      if (pinfo.matchcounts.size()>maxhits){
+        for (int ti=0; ti<maxhits; ++ti){
+          pinfo.matchcounts[ti]=pinfo.matchcounts[ti+pinfo.matchcounts.size()-maxhits];
+        }
+        while (pinfo.matchcounts.size()>maxhits)
+          pinfo.matchcounts.erase(pinfo.matchcounts.size()-1);
+      }
+
     pinfoarr.add(pinfo);
 //  }
 }
@@ -3731,6 +3754,13 @@ void eseqdb::seqsearchpair(const estr& id,eseq& s,eseq& srev2,earray<epredinfo>&
     //    cout << "#best: " << i << " " << seqs.keys(pinfo.matchcounts[i].seqid) << " " << pinfo.matchcounts[i].score() << endl;
       pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
       pinfo.seqid=pinfo.tophit.seqid;
+      if (pinfo.matchcounts.size()>maxhits){
+        for (int ti=0; ti<maxhits; ++ti){
+          pinfo.matchcounts[ti]=pinfo.matchcounts[ti+pinfo.matchcounts.size()-maxhits];
+        }
+        while (pinfo.matchcounts.size()>maxhits)
+          pinfo.matchcounts.erase(pinfo.matchcounts.size()-1);
+      }
       pinfoarr.add(pinfo);
     }
 //  ta=ta*0.99+t1.lap()*0.01;
@@ -3946,6 +3976,13 @@ void eseqdb::pseqsearch(const estr& str2id,eseq& s,earray<epredinfo>& pinfoarr,e
     //    cout << "#best: " << i << " " << seqs.keys(pinfo.matchcounts[i].seqid) << " " << pinfo.matchcounts[i].score() << endl;
       pinfo.tophit=pinfo.matchcounts[pinfo.matchcounts.size()-1];
       pinfo.seqid=pinfo.tophit.seqid;
+      if (pinfo.matchcounts.size()>maxhits){
+        for (int ti=0; ti<maxhits; ++ti){
+          pinfo.matchcounts[ti]=pinfo.matchcounts[ti+pinfo.matchcounts.size()-maxhits];
+        }
+        while (pinfo.matchcounts.size()>maxhits)
+          pinfo.matchcounts.erase(pinfo.matchcounts.size()-1);
+      }
       pinfoarr.add(pinfo);
     }
   }
