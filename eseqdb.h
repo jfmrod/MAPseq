@@ -100,6 +100,7 @@ class eseqdb
  public:
   int minscore;
   int tophits;
+  int maxhits;
   int topotus;
   int otulim;
 
