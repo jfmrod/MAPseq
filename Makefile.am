@@ -5,13 +5,13 @@ DIST_SUBDIRS=$(subdirs)
 
 AM_CXXFLAGS=-DDATAPATH='"$(datadir)/mapseq"'
 
+kmerseqtables_LDADD=
+mapseq_LDADD=
+
 if !USE_SYSEUTILS
-  mapseq_LDADD=$(srcdir)/libs/eutils/libeutils.la
-  kmerseqtables_LDADD=$(srcdir)/libs/eutils/libeutils.la
+  mapseq_LDADD+=$(srcdir)/libs/eutils/libeutils.la
+  kmerseqtables_LDADD+=$(srcdir)/libs/eutils/libeutils.la
   AM_CXXFLAGS+= -I$(srcdir)/libs
-else
-  kmerseqtables_LDADD=""
-  mapseq_LDADD=""
 endif
 
 #TESTS=tests/simple.sh

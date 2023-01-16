@@ -3020,7 +3020,181 @@ void heapsortr(T& arr){
     arr.swap(i,arr.size()-1-i);
 }
 
+void initDB(eseqdb& db,int argi=2);
+void loadSequences(eseqdb& db,int argi=2);
+void loadTaxonomy(eseqdb& db,int argi=3);
 
+
+void actionASVOTUTable()
+{
+  ldieif(getParser().args.size()<2,"syntax: sample1.asv.csv [sample2.asv.csv ...]");
+
+  eintarray tl;
+  epregisterI(tl,"[<integer>,<integer>,...] choose which level to make table for, usually 6,5 for species and 97% OTU");
+  eparseArgs();
+  cout << tl << endl;
+
+  int taxind=-1;
+  egzfile f;
+
+  estr tmptax;
+  int sind,tl1,tli;
+  float cf;
+  earray<earray<estrhashof<eintarray> > > tax;
+  tax.add(earray<estrhashof<eintarray> >());
+
+  loadSequences(db,2);
+  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
+  ldieif(db.seqs.size()==0,"empty database");
+  loadTaxonomy(db,3);
+  initDB(db,2);
+
+  esearchws searchws(db);
+  mtdata.seqdb=&db;
+
+  eintarray mseqlines;
+  earray<estr> samples;
+  estr line;
+  estrarray arr;
+  eseq s;
+
+  earray<estrhashof<eintarray> > otusamples;
+  otusamples.init(mtdata.seqdb->taxa.size());
+
+
+  efile asvotuf;
+
+  asvotuf.open("asv.otumap","w");
+
+  estrhash otuasv;
+
+  estr samplef=getParser().args[1];
+  estrarray samplesf=samplef.explode(",");
+  for (int i=0; i<samplesf.size(); ++i){
+    f.open(samplesf[i],"r");
+    if (f.eof() || !f.readarr(line,arr," ")) { lerror("empty first line"); exit(0); }
+    int si=samples.size();
+    for (int k=1; k<arr.size(); ++k)
+      samples.add(arr[k]);
+    for (int k=0; k<otusamples.size(); ++k){
+      for (int l=0; l<otusamples[k].size(); ++l){
+        while (otusamples[k].values(l).size() < samples.size())
+          otusamples[k].values(l).add(0);
+      }
+    }
+    while (!f.eof() && f.readarr(line,arr," ")){
+      earray<epredinfo> pinfoarr;
+      s.setseq(arr[0]);
+      db.seqsearch(arr[0],s,pinfoarr,searchws);
+
+      if (pinfoarr.size()==0) continue;
+
+      epredinfo *topinfo=&pinfoarr[0];
+      for (int pi=1; pi<pinfoarr.size(); ++pi){
+        if (pinfoarr[pi].tophit.score()>topinfo->tophit.score()) topinfo=&pinfoarr[pi];
+      }
+  
+      epredinfo& pinfo(*topinfo);
+      float taxcutoffmin=pinfo.matchcounts[0].identity();
+      float bid=pinfo.tophit.identity();
+      if (mtdata.seqdb->taxa.size() && mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]!=0x00){
+        eseqtax &tmptaxhit(*mtdata.seqdb->taxa.at(0).seqs[pinfo.tophit.seqid]);
+        // adjust id to closest gold hit
+        if (tmptaxhit.bid>0.0 && bid>tmptaxhit.bid) bid=tmptaxhit.bid;
+      }
+ 
+      estr taxstr;
+      earray<edoublearray> taxscores;
+      taxscores.init(mtdata.seqdb->taxa.size());
+      for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+        etax& tax(mtdata.seqdb->taxa.at(t));
+    
+        efloatarray mcfarr;
+        earrayof<double,int> ptax;
+        efloatarray tmpmcfarr;
+        earrayof<double,int> tmptax;
+        taxScoreSumE(taxscores[t],pinfo,tax,searchws.taxcounts,s.seqlen);
+        earrayof<double,int> mixedtax; // best mixed prediction over all taxonomies
+        efloatarray mixedmcfarr;
+
+        taxScoreE(ptax,mcfarr,pinfo.tophit,pinfo,taxscores[t],tax,s.seqlen);
+        mixedtax=ptax;
+        mixedmcfarr=mcfarr;
+        for (int l=pinfo.matchcounts.size()-2; l>=0; --l){
+          ealigndata& adata(pinfo.matchcounts[l]);
+          taxScoreE(tmptax,tmpmcfarr,adata,pinfo,taxscores[t],tax,s.seqlen);
+          for (int tl=0; tl<tmptax.size(); ++tl){ // choose top hit in list which is not always best aligned (when including evidence or indirect taxonomy)
+            if (tmpmcfarr[tl]>mixedmcfarr[tl]){ // should check per level or just for top?
+              ldieif(mixedtax.size()!=tmptax.size(),"size mismatch: "+estr(mixedtax.size())+" "+tmptax.size());
+              mixedtax.values(tl)=tmptax.values(tl); 
+              mixedtax.keys(tl)=tmptax.keys(tl); 
+              mixedmcfarr[tl]=tmpmcfarr[tl];
+            }
+            if (tmpmcfarr[tl]>mcfarr[tl]){ // should check per level or just for top?
+              ptax=tmptax; 
+              mcfarr=tmpmcfarr;
+            }
+          }
+        }
+
+        estr tmpstr,tmpstrfull;
+        int k=0;
+        for (k=0; k<mixedtax.size(); ++k){
+          if (mixedmcfarr[k]<0.5) break;
+          tmpstrfull+=";";
+          tmpstrfull+=tax.names[k].at(mixedtax.keys(k));
+        }
+        for (k=0; k<mixedtax.size(); ++k){
+          if (mixedmcfarr[k]<0.5 || t<tl.size() && k>=tl[t]) break;
+          tmpstr+=";";
+          tmpstr+=tax.names[k].at(mixedtax.keys(k));
+        }
+        tmpstr.del(0,1);
+        if (t>=tl.size() || k>=tl[t]) {
+          if (otuasv.exists(tmpstr))
+            otuasv[tmpstr]+=","+arr[0];
+          else
+            otuasv.add(tmpstr,arr[0]);
+          if (!(otusamples[t].exists(tmpstr)))
+            otusamples[t].add(tmpstr,eintarray()).init(samples.size(),0);
+          for (int k=1; k<arr.size(); ++k)
+            otusamples[t][tmpstr][si+k-1]+=arr[k].i();
+        }else{
+          if (!(otusamples[t].exists("unmapped")))
+            otusamples[t].add("unmapped",eintarray()).init(samples.size(),0);
+          for (int k=1; k<arr.size(); ++k)
+            otusamples[t]["unmapped"][si+k-1]+=arr[k].i();
+        }
+        taxstr+="\t";
+        taxstr+=tmpstrfull.substr(1);
+      }
+      asvotuf.write(arr[0] + taxstr + "\n");
+      // mapseq arr[0]
+      // for each samplecounts arr[1..N] add to sample OTU counts table to mapped OTU
+    }
+    f.close();
+  }
+
+  efile otuasvf;
+  otuasvf.open("otu.asvmap","w");
+  for (int i=0; i<otuasv.size(); ++i)
+    otuasvf.write(otuasv.keys(i) + "\t" + otuasv.values(i) + "\n");
+  otuasvf.close();
+
+  for (int i=0; i<otusamples.size(); ++i){
+    cout << "### " << i << endl;
+    for (int k=0; k<samples.size(); ++k)
+      cout << "\t" << samples[k];
+    cout << endl;
+    for (int j=0; j<otusamples[i].size(); ++j){
+      cout << otusamples[i].keys(j);
+      for (int m=0; m<otusamples[i].values(j).size(); ++m)
+        cout << "\t" << otusamples[i].values(j)[m];
+      cout << endl;
+    }
+  }
+  exit(0);
+}
 
 void actionOTUTable()
 {
@@ -3128,78 +3302,99 @@ void actionOTUTable()
 void actionOTUCounts()
 {
   ldieif(getParser().args.size()<2,"syntax: sample1.mseq");
+  int ti=-1;
+  int tl=-1;
+  epregister(ti);
+  epregister(tl);
+  eparseArgs();
+  ldieif(ti==-1 && tl>=0 || ti>=0 && tl==-1,"only one tl or ti option provided, but both are needed");
 
-  int taxind=-1;
   egzfile f;
 
-  estr run=getParser().args[1];
-  estrarray arr=run.explode("/");
-  run=arr[arr.size()-1];
-
-  estr tmptax;
-  int sind,tl,tli;
-  float cf;
-  earray<earray<estrhashof<int> > > tax;
-  tax.add(earray<estrhashof<int> >());
-
-  int mseqlines=0;
-  f.open(getParser().args[1],"r");
-  while (!f.eof() && f.readarr(arr,"\t")){
-    if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
-    if (taxind==-1){
-      for (taxind=0; taxind<arr.size(); ++taxind){
-        if (arr[taxind].len()==0){
-          taxind=taxind+1;
-//          cout << "taxind: " << taxind << endl;
-          break;
+  for (int tfi=1; tfi<getParser().args.size(); ++tfi){
+    int taxind=-1;
+    estr run=getParser().args[tfi];
+    estrarray arr=run.explode("/");
+    run=arr[arr.size()-1];
+  
+    estr tmptax;
+    int sind;
+    float cf;
+    earray<earray<estrhashof<int> > > tax;
+    tax.add(earray<estrhashof<int> >());
+  
+    int mseqlines=0;
+    f.open(getParser().args[tfi],"r");
+    while (!f.eof() && f.readarr(arr,"\t")){
+      if (arr.size()==0 || arr[0].len()==0 || arr[0][0]=='#') continue;
+      if (taxind==-1){
+        for (taxind=0; taxind<arr.size(); ++taxind){
+          if (arr[taxind].len()==0){
+            taxind=taxind+1;
+  //          cout << "taxind: " << taxind << endl;
+            break;
+          }
         }
       }
-    }
-    ++mseqlines;
-    sind=taxind;
-    tmptax.clear();
-    tli=0;
-    for (int i=taxind; i<arr.size(); i+=3){
-      if (arr[i].len()==0){
-        ++i;
-        if (i>=arr.size()) break;
-        sind=i;
-        ++tli;
-        if (tax.size()<=tli) tax.add(earray<estrhashof<int> >());
-        tmptax.clear();
+      ++mseqlines;
+      sind=taxind;
+      tmptax.clear();
+      int tli=0;
+      for (int i=taxind; i<arr.size(); i+=3){
+        if (arr[i].len()==0){
+          ++i;
+          if (i>=arr.size()) break;
+          sind=i;
+          ++tli;
+          if (tax.size()<=tli) tax.add(earray<estrhashof<int> >());
+          tmptax.clear();
+        }
+        int tl=(i-sind)/3;
+        cf=arr[i+1].f();
+  //      cout << arr[i] << " " << cf << endl;
+        if (cf<0.5) continue;
+        tmptax+=";"+arr[i];
+  //      cout << tli << " " << tl << " " << tmptax << " " << cf << endl;
+  
+        earray<estrhashof<int> > &taxonc(tax[tli]);
+  
+        if (taxonc.size()<=tl) taxonc.add(estrhashof<int>());
+        estrhashof<int> &taxc(taxonc[tl]);
+        if (!(taxc.exists(tmptax)))
+          taxc.add(tmptax,0);
+        ++taxc[tmptax];
       }
-      tl=(i-sind)/3;
-      cf=arr[i+1].f();
-//      cout << arr[i] << " " << cf << endl;
-      if (cf<0.5) continue;
-      tmptax+=";"+arr[i];
-//      cout << tli << " " << tl << " " << tmptax << " " << cf << endl;
-
-      earray<estrhashof<int> > &taxonc(tax[tli]);
-
-      if (taxonc.size()<=tl) taxonc.add(estrhashof<int>());
-      estrhashof<int> &taxc(taxonc[tl]);
-      if (!(taxc.exists(tmptax)))
-        taxc.add(tmptax,0);
-      ++taxc[tmptax];
     }
-  }
-
-  estrarrayof<int> tmpabs;
-//  cout << ">" << run << "." << readsample << "\t" << mseqlines << endl;
-  cout << "#" << run << "\t" << mseqlines << endl;
-  cout << "Taxonomy\tTaxonomyLevel\tLabel\tCounts" << endl;
-  for (int i=0; i<tax.size(); ++i){
-    earray<estrhashof<int> > &taxonc(tax[i]);
-    for (int j=0; j<taxonc.size(); ++j){
-      estrhashof<int> &taxc(taxonc[j]);
+  
+    estrarrayof<int> tmpabs;
+  //  cout << ">" << run << "." << readsample << "\t" << mseqlines << endl;
+    if (ti!=-1 && tl!=-1){
+      cout << ">" << run << "\t" << mseqlines << endl;
+      earray<estrhashof<int> > &taxonc(tax[ti]);
+      estrhashof<int> &taxc(taxonc[tl]);
       tmpabs.clear();
       for (int k=0; k<taxc.size(); ++k)
         tmpabs.add(taxc.keys(k).substr(1),taxc.values(k));
       heapsortr(tmpabs);
       for (int k=0; k<tmpabs.size(); ++k)
-        cout << i << "\t" << j << "\t" << tmpabs.keys(k) << "\t" << tmpabs.values(k) << endl;
+        cout << tmpabs.keys(k) << "\t" << tmpabs.values(k) << endl;
+    }else{
+      cout << "#" << run << "\t" << mseqlines << endl;
+      cout << "Taxonomy\tTaxonomyLevel\tLabel\tCounts" << endl;
+      for (int i=0; i<tax.size(); ++i){
+        earray<estrhashof<int> > &taxonc(tax[i]);
+        for (int j=0; j<taxonc.size(); ++j){
+          estrhashof<int> &taxc(taxonc[j]);
+          tmpabs.clear();
+          for (int k=0; k<taxc.size(); ++k)
+            tmpabs.add(taxc.keys(k).substr(1),taxc.values(k));
+          heapsortr(tmpabs);
+          for (int k=0; k<tmpabs.size(); ++k)
+            cout << i << "\t" << j << "\t" << tmpabs.keys(k) << "\t" << tmpabs.values(k) << endl;
+        }
+      }
     }
+    f.close();
   }
   exit(0);
 }
@@ -3235,6 +3430,7 @@ void help()
   printf("\n"); 
   printf("Extra information:\n"); 
   printf("%20s   %5s  %s\n","-print_hits","","outputs list of top hits for each input sequence");
+  printf("%20s   %5s  %s\n","-print_kmerhits","","outputs list of top kmer hits for each input sequence");
   printf("%20s   %5s  %s\n","-print_align","","outputs alignments");
   printf("\n"); 
   printf("Generating count summaries from mapseq output:\n"); 
@@ -3324,7 +3520,7 @@ void loadProtSequences(eseqdb& db,int argi=2)
 }
 
 
-void loadSequences(eseqdb& db,int argi=2)
+void loadSequences(eseqdb& db,int argi)
 {
   estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
   if (getParser().args.size()>argi)
@@ -3336,7 +3532,7 @@ void loadSequences(eseqdb& db,int argi=2)
   db.loadSequences(dbfile);
 }
 
-void initDB(eseqdb& db,int argi=2){
+void initDB(eseqdb& db,int argi){
   estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
   if (getParser().args.size()>argi)
     dbfile=getParser().args[argi];
@@ -3746,7 +3942,7 @@ void loadTaxonomyBinary(eseqdb& db,const estr& fname)
   f.close();
 }
 
-void loadTaxonomy(eseqdb& db,int argi=3)
+void loadTaxonomy(eseqdb& db,int argi)
 {
   if (getParser().args.size()>argi) {
     for (int i=argi; i<getParser().args.size(); ++i){
@@ -3804,7 +4000,8 @@ void actionCluster()
 //  loadSequences(db);
 //  cerr << "# loaded " << db.seqs.size() << " sequences" << endl;
 //  ldieif(db.seqs.size()==0,"empty database");
-  db.processQueryFASTA(getParser().args[1],taskCluster,t);
+  if (db.processQueryFASTA(getParser().args[1],taskCluster,t)!=0)
+    ldie("failed processing data");
   exit(0);
 }
 
@@ -3848,7 +4045,8 @@ void actionClusterCompress()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryFASTA(getParser().args[1],taskClusterCompress,t);
+  if (db.processQueryFASTA(getParser().args[1],taskClusterCompress,t)!=0)
+    ldie("process query");
   exit(0);
 }
 
@@ -3871,7 +4069,8 @@ void actionPairend()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryPairend(getParser().args[1],getParser().args[2],taskSearchPaired,t);
+  if (db.processQueryPairend(getParser().args[1],getParser().args[2],taskSearchPaired,t)!=0)
+    ldie("process query");
 
   exit(0);
 }
@@ -4096,7 +4295,8 @@ void actionProtSearch()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryFASTA(getParser().args[1],taskProtSearch,t);
+  if (db.processQueryFASTA(getParser().args[1],taskProtSearch,t)!=0)
+    ldie("process query");
 
   exit(0);
 }
@@ -4181,7 +4381,8 @@ void actionCompress()
   ethreads t;
   t.setThreads(nthreads);
 
-  db.processQueryFASTA(getParser().args[1],taskCompress,t);
+  if (db.processQueryFASTA(getParser().args[1],taskCompress,t)!=0)
+    ldie("process query");
   exit(0);
 }
 
@@ -4237,6 +4438,9 @@ int emain()
   getParser().onHelp=help;
   initdlt();
   bool fastq=false;
+  bool sens=false;
+
+  epregister(sens);
 
   epregister(minqual);
   epregister(minlen);
@@ -4250,6 +4454,7 @@ int emain()
   epregister2(db.otulim,"otulim");
   epregister(lambda);
   epregister2(mtdata.print_hits,"print_hits");
+  epregister2(mtdata.print_kmerhits,"print_kmerhits");
   epregister2(mtdata.print_align,"print_align");
   epregister2(db.minscore,"minscore");
   epregister(minid1);
@@ -4286,6 +4491,7 @@ int emain()
 
   getParser().actions.add("otucounts",actionOTUCounts);
   getParser().actions.add("otutable",actionOTUTable);
+  getParser().actions.add("asvotutable",actionASVOTUTable);
   getParser().actions.add("chimera",actionChimera);
 
 
@@ -4301,6 +4507,7 @@ int emain()
 
   epregister(nthreads);
 
+  epregister2(db.maxhits,"maxhits");
   epregister2(db.tophits,"tophits");
   epregister2(db.topotus,"topotus");
   int step=0;
@@ -4312,6 +4519,11 @@ int emain()
 
 //  epregister(kmer);
   eparseArgs();
+  if (sens){
+    db.otulim=10000;
+    db.tophits=10000;
+    db.topotus=60;
+  }
   cerr << "# mapseq v"<< MAPSEQ_PACKAGE_VERSION << " (" << __DATE__ << ")" << endl;
 
   if(getParser().args.size()<2){
@@ -4349,10 +4561,13 @@ int emain()
   ethreads t;
   t.setThreads(nthreads);
 
+  int procret=0;
   if (!fastq)
-    db.processQueryFASTA(getParser().args[1],taskSearch,t);
+    procret=db.processQueryFASTA(getParser().args[1],taskSearch,t);
   else
-    db.processQueryFASTQ(getParser().args[1],taskSearch,t);
+    procret=db.processQueryFASTQ(getParser().args[1],taskSearch,t);
+
+  ldieif(procret!=0,"process query");
 
   exit(0);
 
