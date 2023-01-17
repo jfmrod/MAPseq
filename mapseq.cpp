@@ -3032,7 +3032,7 @@ void actionASVOTUTable()
   eintarray tl;
   epregisterI(tl,"[<integer>,<integer>,...] choose which level to make table for, usually 6,5 for species and 97% OTU");
   eparseArgs();
-  cout << tl << endl;
+//  cout << tl << endl;
 
   int taxind=-1;
   egzfile f;
@@ -3084,6 +3084,8 @@ void actionASVOTUTable()
     }
     while (!f.eof() && f.readarr(line,arr," ")){
       earray<epredinfo> pinfoarr;
+      if (arr[0].len() && arr[0][0]=='"' && arr[0][arr[0].len()-1]=='"') // trim double quotes
+        arr[0]=arr[0].substr(1,arr[0].len()-2);
       s.setseq(arr[0]);
       db.seqsearch(arr[0],s,pinfoarr,searchws);
 
@@ -3107,6 +3109,8 @@ void actionASVOTUTable()
       earray<edoublearray> taxscores;
       taxscores.init(mtdata.seqdb->taxa.size());
       for (int t=0; t<mtdata.seqdb->taxa.size(); ++t){
+        if (t<tl.size() && tl[t]==-1) continue;
+
         etax& tax(mtdata.seqdb->taxa.at(t));
     
         efloatarray mcfarr;
@@ -3157,13 +3161,20 @@ void actionASVOTUTable()
             otuasv.add(tmpstr,arr[0]);
           if (!(otusamples[t].exists(tmpstr)))
             otusamples[t].add(tmpstr,eintarray()).init(samples.size(),0);
+          eintarray &tarr(otusamples[t][tmpstr]);
+          while (tarr.size() < si+arr.size()) tarr.add(0);
+
           for (int k=1; k<arr.size(); ++k)
-            otusamples[t][tmpstr][si+k-1]+=arr[k].i();
+            tarr[si+k-1]+=arr[k].i();
         }else{
           if (!(otusamples[t].exists("unmapped")))
             otusamples[t].add("unmapped",eintarray()).init(samples.size(),0);
+
+          eintarray &tarr(otusamples[t]["unmapped"]);
+          while (tarr.size() < si+arr.size()) tarr.add(0);
+
           for (int k=1; k<arr.size(); ++k)
-            otusamples[t]["unmapped"][si+k-1]+=arr[k].i();
+            tarr[si+k-1]+=arr[k].i();
         }
         taxstr+="\t";
         taxstr+=tmpstrfull.substr(1);
@@ -3182,14 +3193,16 @@ void actionASVOTUTable()
   otuasvf.close();
 
   for (int i=0; i<otusamples.size(); ++i){
+    if (i<tl.size() && tl[i]==-1) continue;
     cout << "### " << i << endl;
     for (int k=0; k<samples.size(); ++k)
       cout << "\t" << samples[k];
     cout << endl;
     for (int j=0; j<otusamples[i].size(); ++j){
       cout << otusamples[i].keys(j);
-      for (int m=0; m<otusamples[i].values(j).size(); ++m)
-        cout << "\t" << otusamples[i].values(j)[m];
+      eintarray &tarr(otusamples[i].values(j));
+      for (int m=0; m<samples.size(); ++m)
+        cout << "\t" << (m<tarr.size()?tarr[m]:0);
       cout << endl;
     }
   }
@@ -3450,11 +3463,11 @@ void help()
 
 void loadProtSequences(eseqdb& db,int argi=2)
 {
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
+  estr dbfile=estr(DATAPATH)+"/mapref-3.0.fna";
   if (getParser().args.size()>argi)
     dbfile=getParser().args[argi];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-3.0.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
   estr str2id,str2seq,line;
@@ -3522,22 +3535,22 @@ void loadProtSequences(eseqdb& db,int argi=2)
 
 void loadSequences(eseqdb& db,int argi)
 {
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
+  estr dbfile=estr(DATAPATH)+"/mapref-3.0.fna";
   if (getParser().args.size()>argi)
     dbfile=getParser().args[argi];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-3.0.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
   db.loadSequences(dbfile);
 }
 
 void initDB(eseqdb& db,int argi){
-  estr dbfile=estr(DATAPATH)+"/mapref-2.2b.fna";
+  estr dbfile=estr(DATAPATH)+"/mapref-3.0.fna";
   if (getParser().args.size()>argi)
     dbfile=getParser().args[argi];
   else if (!efile(dbfile).exists())
-    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna";
+    dbfile=dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-3.0.fna";
   if (!efile(dbfile).exists()) ldie("fasta db not found: "+dbfile);
 
   db.init(dbfile,nocluster,outfmt.value());
@@ -3950,13 +3963,13 @@ void loadTaxonomy(eseqdb& db,int argi)
       db.loadTaxonomy(getParser().args[i]);
     }
   }else if (getParser().args.size()<argi){ // do not automatically load taxonomy if database is specified
-    if (efile(estr(DATAPATH)+"/mapref-2.2b.fna.ncbitax").exists()){
-      db.loadTaxonomy(estr(DATAPATH)+"/mapref-2.2b.fna.ncbitax");
-      db.loadTaxonomy(estr(DATAPATH)+"/mapref-2.2b.fna.otutax");
+    if (efile(estr(DATAPATH)+"/mapref-3.0.fna.ncbitax").exists()){
+      db.loadTaxonomy(estr(DATAPATH)+"/mapref-3.0.fna.ncbitax");
+      db.loadTaxonomy(estr(DATAPATH)+"/mapref-3.0.fna.otutax");
 //      load_taxa(estr(DATAPATH)+"/mapref.fna.ltps119tax",db);
-    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna.ncbitax").exists()){
-      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna.ncbitax");
-      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-2.2b.fna.otutax");
+    }else if (efile(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-3.0.fna.ncbitax").exists()){
+      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-3.0.fna.ncbitax");
+      db.loadTaxonomy(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref-3.0.fna.otutax");
 //      load_taxa(dirname(getSystem().getExecutablePath())+"/share/mapseq/mapref.fna.ltps119tax",db);
     }
   }
