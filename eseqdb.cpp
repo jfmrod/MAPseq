@@ -793,9 +793,10 @@ int eseqdb::processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t){
 //  ethreads t;
   emutex m;
   
-  ldieif(fname=="-","reading from stdin not supported with paired end data");
- 
-  f.open(fname,"r");
+  if (fname=="-")
+    f.open(stdin,"r");
+  else
+    f.open(fname,"r");
 
   mtdata.seqdb=this;
   mtdata.finished=false;
@@ -842,21 +843,24 @@ int eseqdb::processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t){
     str2seq.clear();
     strqual.clear();
     //TODO: read a limited number of nucleotides each time, so the code does not depend on line breaks. For every nucleotide "chunk", compress the nucleotides and add to sequence
-    while (f.readln(line) && line.len()){
+    while (f.readln(line) && line.len() && line[0]!='+'){
       ldieif(lt[line[0]]!=0,"expected nucleotide in: "+line);
       str2seq+=line;
     }
+//    cerr << "# read seq" << endl;
 
-    f.readln(line);
-    ldieif(line[0]!='+',"expected + in: "+line);
-
-    while (f.readln(line) && line.len()){
+//    f.readln(line);
+    ldieif(line.len()==0 || line[0]!='+',"expected + in: "+line);
+    while (f.readln(line) && line.len() && strqual.len()+line.len()<=str2seq.len() ) {
       ldieif(qlt[line[0]]==-1,"expected quality char in: "+line);
       strqual+=line;
+//      cerr << "# qual string" << line << endl;
     }
+//    cerr << "# read qual string" << endl;
 
     fastq_filter(str2id,strqual,str2seq);
     if (str2seq.len()==0) { ++seqcount; continue; }
+//    cerr << "# add sequence" << endl;
 
     cbuf->keys(cbufind)=str2id;
     eseq& s(cbuf->values(cbufind));
@@ -867,6 +871,7 @@ int eseqdb::processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t){
       mtdata.m.lock();
       mtdata.seqs.add(cbuf);
       mtdata.seqsSignal.signal();
+      mtdata.m.unlock();
       cbuf=0x00;
       cbufind=0;
     }
@@ -887,6 +892,8 @@ int eseqdb::processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t){
   
   fprintf(stderr,"\r# processing FASTQ input... %li\n",seqcount);
   f.close();
+  t.wait();
+  cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
   return(0);
 }
 

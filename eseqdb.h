@@ -103,6 +103,8 @@ class eseqdb
   int maxhits;
   int topotus;
   int otulim;
+  int minid1;
+  int minid2;
 
   estrarrayof<eseq> seqs;
   estrhashof<int> seqind;
@@ -176,12 +178,12 @@ extern emtdata mtdata;
 extern float swmin;
 extern float swmax;
 
-extern int minid1;
-extern int minid2;
-extern int topotus;
-extern int tophits;
+//extern int minid1;
+//extern int minid2;
+//extern int topotus;
+//extern int tophits;
 //extern int minscore;
-extern int otulim;
+//extern int otulim;
 extern float sweight;
 extern float sweightabs;
 
