@@ -4436,8 +4436,8 @@ int emain()
   epregister2(mtdata.print_kmerhits,"print_kmerhits");
   epregister2(mtdata.print_align,"print_align");
   epregister2(db.minscore,"minscore");
-  epregister(minid1);
-  epregister(minid2);
+//  epregister(minid1);
+//  epregister(minid2);
   epregister(cfthres);
   epregister2(as.match,"match");
   epregister2(as.mismatch,"mismatch");
@@ -4489,6 +4489,8 @@ int emain()
   epregister2(db.maxhits,"maxhits");
   epregister2(db.tophits,"tophits");
   epregister2(db.topotus,"topotus");
+  epregister2(db.minid1,"minid1");
+  epregister2(db.minid2,"minid2");
   int step=0;
 
 //  epregister(step);

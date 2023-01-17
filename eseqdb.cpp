@@ -11,8 +11,8 @@ using namespace std;
 
 float swmin=0.05;
 float swmax=0.3;
-int minid1=1;
-int minid2=1;
+//int minid1=1;
+//int minid2=1;
 //int topotus=10;
 //int tophits=20;
 //int minscore=30;
@@ -2814,7 +2814,7 @@ void esearchws::initProt(const eseqdb& seqdb)
 */
 }
 
-eseqdb::eseqdb(): minscore(60),tophits(20),maxhits(20),topotus(10),otulim(50)
+eseqdb::eseqdb(): minscore(60),tophits(20),maxhits(20),topotus(10),otulim(50),minid1(1),minid2(1)
 {
   for (unsigned int i=0; i<MAXSIZE; ++i)
     akmers[i]=0x00u;
