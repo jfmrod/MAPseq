@@ -1,5 +1,5 @@
 
-# MAPseq v1.2.6 (24 Mar 2020)
+# MAPseq v2.1 (18 Jan 2023)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -15,6 +15,7 @@ Matias Rodrigues JF, Schmidt TSB, Tackmann J & von Mering C (2017) MAPseq: highl
  b. Custom user-provided reference  
  c. Single sample counts summar  
  d. OTU count table for multiple samples  
+ e. Combining ASV count tables
 3. File output  
 4. History  
 
@@ -44,9 +45,9 @@ https://github.com/jfmrod/MAPseq/releases
 
 To install the binary package simply unpack the contents of the mapseq tar.gz file, e.g.:
 
-tar -xvzf mapseq-1.2-linux.tar.gz   # for the linux version  
+tar -xvzf mapseq-2.1-linux.tar.gz   # for the linux version  
 or  
-tar -xvzf mapseq-1.2-macosx.tar.gz  # for the MacOSX version  
+tar -xvzf mapseq-2.1-macosx.tar.gz  # for the MacOSX version  
 
 The mapseq binary will be located in the created directory. You may move the whole directory to another location. Moving only the binary elsewhere will break the installation though, as the data files are searched for in relation to the binary's path.
 
@@ -159,6 +160,38 @@ The generated table can be imported into R with the following R command:
 myotutable <- read.table("map.otutable",sep="\t",header=TRUE)
 
 
+### e) Combining ASV count tables
+
+If you have one or more datasets in an ASV count table of the form:
+
+          Sample1 Sample2 Sample3
+ASV_SEQ1  0       32      2
+ASV_SEQ2  10      2       0
+...
+
+You can use mapseq to generate a single merged OTU or taxomic count table. MAPseq will map each of the ASV to its MAPref OTU labels or
+NCBI taxonomy and produce a merge count table that can be used for further analysis.
+
+The advantage of this approach is that ASV data covering different 16S/18S rRNA regions can be in this way analysed together.
+
+To achieve this you can call mapseq with the following command:
+
+mapseq -asvotutable 'sample1.asv.txt,sample2.asv.txt' > merged.otucounts.dat
+
+In addition two files will be generated asv.otumap, and otu.asvmap showing the mappings of each ASV sequence to the OTU or taxonomic labels and vice-versa.
+
+The level of the OTUs or taxonomy can be specified with the "-tl" option in the following manner:
+
+mapseq -asvotutable -tl '{[-1,5]}' 'sample1.asv.txt,sample2.asv.txt' > merged.otucounts.dat
+
+The -1 indicates the first taxonomic label (NCBI taxonomy) should be skipped, and 5 indicates the 5th level in the 2nd taxonomic label (MAP OTUs at 99% level) should be selected.
+
+mapseq -asvotutable -tl '{[7,-1]}' 'sample1.asv.txt,sample2.asv.txt' > merged.otucounts.dat
+
+Would generate a merged count table with 7th level of NCBI taxonomy (species) and skipped OTU labels.
+
+Specifying a positive value for NCBI and MAP OTU levels will lead to two count tables being generated in the same file which might not be desired.
+
 
 ## 3. MSEQ FILE OUTPUT
 
@@ -203,6 +236,12 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+2.1 (18 Jan 2023)
+- Updated MAPref to v3.0 with new MAP OTU labels as used on the Microbe Atlas Project website (https://microbeatlas.org/)
+- Added paired end analysis which automatically handles overlapping and non-overlapping paired end sequence mapping
+- Added a sensitive mode for more accurate analysis needed in some applications
+- Added -asvotutable option to generate a merged count table from several ASV count tables
+
 1.2.6 (24 Mar 2020)
 - Fixed "-otutable" option using only counts from first sample.
 
