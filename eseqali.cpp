@@ -1,7 +1,12 @@
 #include "eseqali.h"
 
+#ifndef MAX
 #define MAX(a,b) ((a)>(b)?(a):(b))
+#endif
+
+#ifndef MIN
 #define MIN(a,b) ((a)<(b)?(a):(b))
+#endif
 
 char aa[]={'A','N','C','P','D','Q','E','R','F','S','G','T','H','V','I','W','K','Y','L','M','*'};
 unsigned long seqpkmer(const eseq& s,long p1);

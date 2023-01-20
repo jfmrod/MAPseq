@@ -1,5 +1,5 @@
 
-# MAPseq v2.1 (18 Jan 2023)
+# MAPseq v2.1.1 (20 Jan 2023)
 by Joao F. Matias Rodrigues, Thomas S.B. Schmidt, Janko Tackmann, and Christian von Mering  
 Institute of Molecular Life Sciences, University of Zurich, Switzerland
 
@@ -236,11 +236,17 @@ query1	FJ560320:1..876	301	0.7369985	301	0	0	0	301	305	606	+		Archaea		Archaea;F
 
 
 ## 4. HISTORY
+2.1.1 (20 Jan 2023)
+- Added support for paired end FASTQ read mapping
+
 2.1 (18 Jan 2023)
 - Updated MAPref to v3.0 with new MAP OTU labels as used on the Microbe Atlas Project website (https://microbeatlas.org/)
 - Added paired end analysis which automatically handles overlapping and non-overlapping paired end sequence mapping
-- Added a sensitive mode for more accurate analysis needed in some applications
+- Added FASTQ support
+- Added a sensitive mode (-sens) for more accurate analysis needed in some applications
 - Added -asvotutable option to generate a merged count table from several ASV count tables
+- Support for reading .gz compressed files
+- Other improvements
 
 1.2.6 (24 Mar 2020)
 - Fixed "-otutable" option using only counts from first sample.

@@ -1168,6 +1168,177 @@ int eseqdb::processQueryPairend(const estr& fname,const estr& fname2,void (*task
 }
 
 
+int eseqdb::processQueryPairendFASTQ(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t)
+{
+  estr qualchrs="!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+  for (int i=0; i<256; ++i){
+    lt[i]=1;
+    qlt[i]=-1;
+  }
+  for (int i=0; i<qualchrs.len(); ++i)
+    qlt[(unsigned char)qualchrs[i]]=i;
+
+  lt['N']=0;
+  lt['n']=0;
+  lt['A']=0;
+  lt['T']=0;
+  lt['G']=0;
+  lt['C']=0;
+  lt['a']=0;
+  lt['t']=0;
+  lt['g']=0;
+  lt['c']=0;
+
+  for (unsigned int i=0u; i<(1u<<16u); ++i)
+    lt16[i]=lt[i&0xff]+lt[(i>>8u)&0xff];
+
+  etimer t1;
+  t1.reset();
+
+  egzfile f,f2;
+  estr line,line2;
+  estrarray args;
+
+  t1.reset();
+  emutex m;
+  
+  int reterr=0;
+
+  ldieif(fname=="-","reading from stdin not supported with paired end data");
+ 
+  f.open(fname,"r");
+  f2.open(fname2,"r");
+
+  mtdata.seqdb=this;
+  mtdata.finished=false;
+  mtdata.output.clear();
+
+  t1.reset();
+  t.run(taskfunc,evararray());
+
+  mtdata.sbuffer.reserve(t.threads.size()*2);
+  for (int i=0; i<t.threads.size()*2; ++i){
+    estrarrayof<eseq> *sarr=new estrarrayof<eseq>;
+    for (int j=0; j<100; ++j) sarr->add(estr(),eseq());
+    mtdata.sbuffer.add(sarr);
+  }
+
+//  cerr << "# processing input... ";
+  long seqcount=0;
+  fprintf(stderr,"# processing input... ");
+  fflush(stderr);
+  lerrorif(!f.readln(line),"unable to read query file");
+  lerrorif(!f2.readln(line2),"unable to read query file2");
+  estrarrayof<eseq> *cbuf=0x00;
+
+  int cbufind=0;
+  const int MAXSEQLEN=100000;
+  long seqstart,seqstart2;
+  estr str2seq,str2id,strqual;
+  estr str2seq2,str2id2,strqual2;
+  str2seq.reserve(MAXSEQLEN);
+  str2seq2.reserve(MAXSEQLEN);
+  while (!f.eof() && !f2.eof()){
+    if (cbuf==0x00){
+      mtdata.m.lock();
+      while (mtdata.sbuffer.size()==0) mtdata.sbufferSignal.wait(mtdata.m);
+      cbuf=mtdata.sbuffer[mtdata.sbuffer.size()-1];
+      mtdata.sbuffer.erase(mtdata.sbuffer.size()-1);
+      mtdata.m.unlock();
+      cbufind=0;
+    }
+
+    seqstart=0;
+    seqstart2=0;
+    str2id=line; str2id2=line2;
+
+    ldieif(str2id.len()==0 || str2id[0]!='@',"Unexpected line: "+str2id+" on file: "+fname);
+    ldieif(str2id2.len()==0 || str2id2[0]!='@',"Unexpected line: "+str2id2+" on file: "+fname2);
+
+    str2id.del(0,1);
+    int i=str2id.findchr(" \t");
+    if (i!=-1l) str2id.del(i); // only keep id up to first white space
+
+    str2id2.del(0,1);
+    i=str2id2.findchr(" \t");
+    if (i!=-1l) str2id2.del(i); // only keep id up to first white space
+
+    str2seq.clear();
+    strqual.clear();
+    //TODO: read a limited number of nucleotides each time, so the code does not depend on line breaks. For every nucleotide "chunk", compress the nucleotides and add to sequence
+    while (f.readln(line) && line.len() && line[0]!='+'){
+      ldieif(lt[line[0]]!=0,"expected nucleotide in: "+line);
+      str2seq+=line;
+    }
+    ldieif(line.len()==0 || line[0]!='+',"expected + in: "+line+" file: "+fname);
+
+    str2seq2.clear();
+    strqual2.clear();
+    while (f2.readln(line2) && line2.len() && line2[0]!='+'){
+      ldieif(lt[line2[0]]!=0,"expected nucleotide in: "+line2);
+      str2seq2+=line2;
+    }
+    ldieif(line2.len()==0 || line2[0]!='+',"expected + in: "+line2+" file: "+fname2);
+
+    ldieif(str2id.len()!=str2id2.len() || str2id!=str2id2,"paired end read ids do not match or reads are not in sync: "+str2id+" != "+str2id2);
+
+    while (f.readln(line) && line.len() && strqual.len()+line.len()<=str2seq.len() ) {
+      ldieif(qlt[line[0]]==-1,"expected quality char in: "+line+" file: "+fname);
+      strqual+=line;
+    }
+    fastq_filter(str2id,strqual,str2seq);
+
+    while (f2.readln(line2) && line2.len() && strqual2.len()+line2.len()<=str2seq2.len() ) {
+      ldieif(qlt[line2[0]]==-1,"expected quality char in: "+line2+" file: "+fname2);
+      strqual2+=line2;
+    }
+    fastq_filter(str2id2,strqual2,str2seq2);
+
+    if (str2seq.len()==0 && str2seq2.len()==0) { ++seqcount; continue; }
+
+    cbuf->keys(cbufind)=str2id;
+    eseq& s(cbuf->values(cbufind));
+    s.setseq(str2seq);
+    s.seqstart=seqstart;
+    ++cbufind;
+
+    cbuf->keys(cbufind)=str2id2;
+    eseq& s2(cbuf->values(cbufind));
+    s2.setseq(str2seq2);
+    s2.seqstart=seqstart2;
+    ++cbufind;
+
+    if (cbufind==cbuf->size()){
+      mtdata.m.lock();
+      mtdata.seqs.add(cbuf);
+      mtdata.seqsSignal.signal();
+      mtdata.m.unlock();
+      cbuf=0x00;
+    }
+
+    ++seqcount;
+    if (seqcount%100==0 && isatty(2))
+      fprintf(stderr,"\r# processing input... paired end FASTQ reads: %li",seqcount);
+//      fprintf(stderr,"\r# processing input... %li  ti: %f ts: %f ti2: %f ts2: %f ta: %f tdp1: %f tdp2: %f tdpfl: %f tdpmd: %f",seqcount,ti,ts,ti2,ts2,ta,tdp1,tdp2,tdpfl,tdpmd);
+ }
+  mtdata.m.lock();
+  if (cbuf!=0x00){
+    for (int i=cbuf->size()-1; i>=cbufind; --i) cbuf->erase(i);
+    mtdata.seqs.add(cbuf);
+    cbuf=0x00;
+  }
+  mtdata.finished=true;
+  mtdata.seqsSignal.broadcast();
+  mtdata.m.unlock();
+  
+  fprintf(stderr,"\r# processing input... paired end FASTQ reads: %li\n",seqcount);
+  f.close();
+  t.wait();
+  cerr << "# done processing " << seqcount << " seqs (" << t1.lap()*0.001 << "s)" << endl;
+  return(reterr);
+}
+
+
 
 
 

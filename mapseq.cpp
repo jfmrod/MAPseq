@@ -27,6 +27,8 @@ using namespace std;
 #include "ekmerhashmap.h"
 #include "eseqdb.h"
 
+bool fastq=false;
+bool sens=false;
 
 int nthreads=4;
 bool nocluster=false;
@@ -3422,8 +3424,11 @@ void help()
   printf("\n");
   printf("Usage:\n");
   printf("    %s input.fa [<db> <tax1> <tax2> ...]\n",efile(getParser().args[0]).basename()._str);
+  printf("\n  FastQ sequence search:\n");
+  printf("    %s -fastq input1.fastq [<db> <tax1> <tax2> ...]\n",efile(getParser().args[0]).basename()._str);
   printf("\n  Paired end sequence search:\n");
   printf("    %s -paired input1.fa input2.fa [<db> <tax1> <tax2> ...]\n",efile(getParser().args[0]).basename()._str);
+  printf("Gzipped files (.gz) are supported\n");
   printf("\n");
   printf("Classify a fasta file containing sequence reads to the default NCBI taxonomy and OTU classifications.\n");
   printf("Example: mapseq -nthreads 4 rawreads.fa\n"); 
@@ -4079,11 +4084,16 @@ void actionPairend()
 
   db.printSearchHeader();
 
+  int procret;
   ethreads t;
   t.setThreads(nthreads);
+  if (fastq)
+    procret=db.processQueryPairendFASTQ(getParser().args[1],getParser().args[2],taskSearchPaired,t);
+  else
+    procret=db.processQueryPairend(getParser().args[1],getParser().args[2],taskSearchPaired,t);
 
-  if (db.processQueryPairend(getParser().args[1],getParser().args[2],taskSearchPaired,t)!=0)
-    ldie("process query");
+  if (procret!=0)
+    ldie("error");
 
   exit(0);
 }
@@ -4450,8 +4460,6 @@ int emain()
 
   getParser().onHelp=help;
   initdlt();
-  bool fastq=false;
-  bool sens=false;
 
   epregister(sens);
 

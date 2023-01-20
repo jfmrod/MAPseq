@@ -140,6 +140,7 @@ class eseqdb
   int processQueryFASTA(const estr& fname,void (*taskfunc)(),ethreads& t);
   int processQueryFASTQ(const estr& fname,void (*taskfunc)(),ethreads& t);
   int processQueryPairend(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t);
+  int processQueryPairendFASTQ(const estr& fname,const estr& fname2,void (*taskfunc)(),ethreads& t);
 
   void printSearchHeader();
 };
